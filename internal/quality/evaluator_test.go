@@ -31,7 +31,7 @@ func TestEvaluateGoldenProducesMachineReadableSummary(t *testing.T) {
 	}}
 	report, err := EvaluateGolden(context.Background(), searcher, set)
 	if err != nil { t.Fatal(err) }
-	if report.SchemaVersion != 1 || report.Summary.JudgedQueries != 1 || len(report.Queries) != 1 {
+	if report.SchemaVersion != 1 || report.Summary.Queries != 1 || len(report.Queries) != 1 {
 		t.Fatalf("report=%+v", report)
 	}
 	if report.Summary.NDCG10 <= 0 || report.Summary.MRR != 1 || report.Summary.Recall10 != 1 {
@@ -43,7 +43,21 @@ func TestEvaluateGoldenSkipsUnjudgedSeedQueries(t *testing.T) {
 	set := GoldenSet{Version: GoldenSchemaVersion, Queries: []GoldenQuery{{ID: "seed", Query: "query", Judgments: nil}}}
 	report, err := EvaluateGolden(context.Background(), fakeQualitySearcher{}, set)
 	if err != nil { t.Fatal(err) }
-	if report.Summary.JudgedQueries != 0 || len(report.Queries) != 0 {
+	if report.Summary.Queries != 0 || len(report.Queries) != 0 {
 		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestEvaluateGoldenNormalizesJudgmentFragments(t *testing.T) {
+	set := GoldenSet{Version: GoldenSchemaVersion, Queries: []GoldenQuery{
+		{ID: "q1", Query: "alpha", Judgments: []Judgment{{URL: "https://example.com/a#fragment", Grade: 3}}},
+	}}
+	searcher := fakeQualitySearcher{responses: map[string]searchsvc.Response{
+		"alpha": {Results: []searchsvc.Result{{URL: "https://example.com/a", Host: "example.com"}}},
+	}}
+	report, err := EvaluateGolden(context.Background(), searcher, set)
+	if err != nil { t.Fatal(err) }
+	if report.Summary.NDCG10 != 1 || report.Summary.MRR != 1 || report.Summary.Recall10 != 1 {
+		t.Fatalf("summary=%+v", report.Summary)
 	}
 }
