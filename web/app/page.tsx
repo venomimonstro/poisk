@@ -1,15 +1,130 @@
+"use client";
+
+import { FormEvent, useState } from "react";
+
+type SearchResult = {
+  id: number;
+  score: number;
+  title: string;
+  url: string;
+  host: string;
+  lang?: string;
+  snippet: string;
+};
+
+type SearchResponse = {
+  query: string;
+  normalized: string;
+  used_query: string;
+  total: number;
+  took_ms: number;
+  results: SearchResult[];
+  cached: boolean;
+};
+
+const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+
 export default function HomePage() {
+  const [query, setQuery] = useState("");
+  const [data, setData] = useState<SearchResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const q = query.trim();
+    if (!q || loading) return;
+
+    setLoading(true);
+    setError("");
+    try {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 5000);
+      const response = await fetch(`${apiBase}/api/search?q=${encodeURIComponent(q)}&limit=10`, {
+        signal: controller.signal,
+        headers: { Accept: "application/json" },
+      });
+      window.clearTimeout(timer);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || "search_failed");
+      }
+      setData(payload as SearchResponse);
+    } catch (err) {
+      setData(null);
+      setError(err instanceof DOMException && err.name === "AbortError" ? "Поиск занял слишком много времени. Попробуйте ещё раз." : "Не удалось выполнить поиск. Попробуйте ещё раз.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const hasResults = Boolean(data?.results?.length);
+
   return (
-    <main className="shell">
-      <section className="hero">
+    <main className={hasResults || data || error ? "shell shellResults" : "shell"}>
+      <section className={hasResults || data || error ? "hero heroCompact" : "hero"}>
         <div className="brand">ПОИСК</div>
-        <h1>Поиск, который не заставляет искать ответ.</h1>
-        <p>Web Search + Answer Engine + GEO. Первая версия интерфейса будет подключена к Search API в Sprint 07.</p>
-        <form className="search" action="#">
-          <input aria-label="Поисковый запрос" placeholder="Найдите или спросите что угодно" disabled />
-          <button type="button" disabled>Найти</button>
+        {!hasResults && !data && !error && (
+          <>
+            <h1>Поиск, который не заставляет искать ответ.</h1>
+            <p>Быстрый независимый поиск по веб-страницам. Answer Engine и GEO подключаются следующими этапами.</p>
+          </>
+        )}
+        <form className="search" onSubmit={onSubmit}>
+          <input
+            aria-label="Поисковый запрос"
+            placeholder="Найдите или спросите что угодно"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            maxLength={256}
+            autoComplete="off"
+          />
+          <button type="submit" disabled={loading || query.trim().length === 0}>
+            {loading ? "Ищем…" : "Найти"}
+          </button>
         </form>
       </section>
+
+      {error && <div className="searchState searchError" role="alert">{error}</div>}
+
+      {data && (
+        <section className="serp" aria-live="polite">
+          <div className="serpMeta">
+            {data.results.length > 0 ? `Найдено: ${data.total}` : "Ничего не найдено"}
+            {data.used_query !== data.normalized && <span> · использован вариант «{data.used_query}»</span>}
+            <span> · {data.took_ms} мс{data.cached ? " · из кэша" : ""}</span>
+          </div>
+
+          {data.results.length === 0 ? (
+            <div className="searchState">
+              Попробуйте изменить формулировку запроса или проверить раскладку клавиатуры.
+            </div>
+          ) : (
+            <ol className="resultsList">
+              {data.results.map((result) => (
+                <li className="resultCard" key={`${result.id}-${result.url}`}>
+                  <div className="resultHost">{result.host}</div>
+                  <a className="resultTitle" href={result.url} rel="noopener noreferrer">
+                    {result.title || result.url}
+                  </a>
+                  <div className="resultUrl">{result.url}</div>
+                  {result.snippet && <p className="resultSnippet">{renderSnippet(result.snippet)}</p>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
     </main>
   );
+}
+
+function renderSnippet(value: string) {
+  const parts = value.split(/(\[\[|\]\])/g);
+  let highlighted = false;
+  return parts.map((part, index) => {
+    if (part === "[[") { highlighted = true; return null; }
+    if (part === "]]" ) { highlighted = false; return null; }
+    return highlighted ? <mark key={index}>{part}</mark> : <span key={index}>{part}</span>;
+  });
 }
