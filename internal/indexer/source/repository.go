@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -35,6 +36,8 @@ type Extracted struct {
 	StructuredData []string
 	ContentHash    [32]byte
 	SimHash        uint64
+	QualityScore   float64
+	SpamScore      float64
 	FetchedAt      time.Time
 }
 
@@ -58,6 +61,7 @@ type Document struct {
 func (r *Repository) SaveExtracted(ctx context.Context, in Extracted) error {
 	if r == nil || r.db == nil { return errors.New("source repository is not initialized") }
 	if in.URLID <= 0 || in.Version <= 0 { return errors.New("url id and version must be positive") }
+	if !validScore(in.QualityScore) || !validScore(in.SpamScore) { return errors.New("quality and spam scores must be finite values between 0 and 100") }
 	if in.FetchedAt.IsZero() { in.FetchedAt = time.Now().UTC() }
 	structured, err := json.Marshal(in.StructuredData)
 	if err != nil { return fmt.Errorf("marshal structured data: %w", err) }
@@ -101,12 +105,14 @@ SET extraction_status = 'READY',
         'lang', $7::text,
         'canonical_url', NULLIF($8::text,''),
         'robots_noindex', $9::boolean,
-        'robots_nofollow', $10::boolean
+        'robots_nofollow', $10::boolean,
+        'quality_score', $11::double precision,
+        'spam_score', $12::double precision
     )
 WHERE url_id = $1 AND version = $2`
 	tag, err := tx.Exec(ctx, markVersion,
 		in.URLID, in.Version, in.ContentHash[:], int64(in.SimHash), in.Title, in.Description, in.Lang,
-		in.CanonicalURL, in.RobotsNoIndex, in.RobotsNoFollow,
+		in.CanonicalURL, in.RobotsNoIndex, in.RobotsNoFollow, in.QualityScore, in.SpamScore,
 	)
 	if err != nil { return fmt.Errorf("mark document version ready: %w", err) }
 	if tag.RowsAffected() != 1 { return ErrNotFound }
@@ -115,10 +121,12 @@ WHERE url_id = $1 AND version = $2`
 UPDATE urls
 SET content_hash = $3,
     simhash = $4,
+    quality_score = $6,
+    spam_score = $7,
     index_status = CASE WHEN $5::boolean THEN 'EXCLUDED' ELSE 'NOT_INDEXED' END,
     updated_at = now()
 WHERE url_id = $1 AND version = $2`
-	currentTag, err := tx.Exec(ctx, updateURL, in.URLID, in.Version, in.ContentHash[:], int64(in.SimHash), in.RobotsNoIndex)
+	currentTag, err := tx.Exec(ctx, updateURL, in.URLID, in.Version, in.ContentHash[:], int64(in.SimHash), in.RobotsNoIndex, in.QualityScore, in.SpamScore)
 	if err != nil { return fmt.Errorf("update current URL extraction state: %w", err) }
 
 	if currentTag.RowsAffected() == 1 {
@@ -215,4 +223,8 @@ LIMIT $2`
 	}
 	if err := rows.Err(); err != nil { return nil, fmt.Errorf("iterate rebuild documents: %w", err) }
 	return out, nil
+}
+
+func validScore(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v <= 100
 }
