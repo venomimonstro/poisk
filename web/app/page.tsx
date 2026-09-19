@@ -22,12 +22,35 @@ type SearchResponse = {
   cached: boolean;
 };
 
+type AnswerSource = {
+  id: number;
+  title: string;
+  url: string;
+  host: string;
+};
+
+type AnswerClaim = {
+  text: string;
+  source_ids: number[];
+};
+
+type AnswerResponse = {
+  available: boolean;
+  answer?: string;
+  claims?: AnswerClaim[];
+  sources?: AnswerSource[];
+  confidence: number;
+  fallback_reason?: string;
+};
+
 const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/$/, "");
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
   const [data, setData] = useState<SearchResponse | null>(null);
+  const [answer, setAnswer] = useState<AnswerResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [answerLoading, setAnswerLoading] = useState(false);
   const [error, setError] = useState("");
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -36,6 +59,8 @@ export default function HomePage() {
     if (!q || loading) return;
 
     setLoading(true);
+    setAnswerLoading(false);
+    setAnswer(null);
     setError("");
     try {
       const controller = new AbortController();
@@ -47,15 +72,38 @@ export default function HomePage() {
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok) throw new Error(payload?.error || "search_failed");
-        setData(payload as SearchResponse);
+        const searchPayload = payload as SearchResponse;
+        setData(searchPayload);
+        if (searchPayload.results.length > 0) void loadAnswer(q);
       } finally {
         window.clearTimeout(timer);
       }
     } catch (err) {
       setData(null);
+      setAnswer(null);
       setError(err instanceof DOMException && err.name === "AbortError" ? "Поиск занял слишком много времени. Попробуйте ещё раз." : "Не удалось выполнить поиск. Попробуйте ещё раз.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadAnswer(q: string) {
+    setAnswerLoading(true);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 4500);
+    try {
+      const response = await fetch(`${apiBase}/api/answer?q=${encodeURIComponent(q)}`, {
+        signal: controller.signal,
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return;
+      const payload = (await response.json()) as AnswerResponse;
+      setAnswer(payload.available ? payload : null);
+    } catch {
+      setAnswer(null);
+    } finally {
+      window.clearTimeout(timer);
+      setAnswerLoading(false);
     }
   }
 
@@ -68,7 +116,7 @@ export default function HomePage() {
         {!hasResults && !data && !error && (
           <>
             <h1>Поиск, который не заставляет искать ответ.</h1>
-            <p>Быстрый независимый поиск по веб-страницам. Answer Engine и GEO подключаются следующими этапами.</p>
+            <p>Быстрый независимый поиск с ответами только по найденным источникам.</p>
           </>
         )}
         <form className="search" onSubmit={onSubmit}>
@@ -90,6 +138,9 @@ export default function HomePage() {
 
       {data && (
         <section className="serp" aria-live="polite">
+          {answerLoading && <div className="answerLoading">Проверяем источники для краткого ответа…</div>}
+          {answer?.available && <AnswerCard answer={answer} />}
+
           <div className="serpMeta">
             {data.results.length > 0 ? `Найдено: ${data.total}` : "Ничего не найдено"}
             {data.used_query !== data.normalized && <span> · использован вариант «{data.used_query}»</span>}
@@ -115,6 +166,42 @@ export default function HomePage() {
         </section>
       )}
     </main>
+  );
+}
+
+function AnswerCard({ answer }: { answer: AnswerResponse }) {
+  const sources = new Map((answer.sources || []).map((source) => [source.id, source]));
+  const claims = answer.claims || [];
+  if (claims.length === 0) return null;
+
+  return (
+    <section className="answerCard" aria-label="Ответ по найденным источникам">
+      <div className="answerEyebrow">Ответ по источникам</div>
+      <div className="answerClaims">
+        {claims.map((claim, index) => (
+          <p className={index === 0 ? "answerLead" : "answerClaim"} key={`${index}-${claim.text}`}>
+            {claim.text}{" "}
+            <span className="answerCitations">
+              {claim.source_ids.map((sourceID) => {
+                const source = sources.get(sourceID);
+                return source ? (
+                  <a key={sourceID} href={source.url} rel="noopener noreferrer" title={source.title || source.host}>
+                    [{sourceID}]
+                  </a>
+                ) : null;
+              })}
+            </span>
+          </p>
+        ))}
+      </div>
+      <div className="answerSources">
+        {(answer.sources || []).map((source) => (
+          <a href={source.url} rel="noopener noreferrer" key={source.id}>
+            [{source.id}] {source.host}
+          </a>
+        ))}
+      </div>
+    </section>
   );
 }
 
