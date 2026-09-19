@@ -141,7 +141,7 @@ func Parse(input []byte, baseURL string, limits Limits) (Document, error) {
 	if err := walk(root, false); err != nil {
 		return Document{}, err
 	}
-	doc.Text = normalizeSpace(strings.Join(textParts, " "))
+	doc.Text = truncateRunes(normalizeSpace(strings.Join(textParts, " ")), limits.MaxTextChars)
 	return doc, nil
 }
 
