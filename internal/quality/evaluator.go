@@ -19,18 +19,9 @@ type QueryReport struct {
 	Hits    int     `json:"hits"`
 }
 
-type Summary struct {
-	JudgedQueries   int     `json:"judged_queries"`
-	NDCG10          float64 `json:"ndcg_10"`
-	MRR             float64 `json:"mrr"`
-	Recall10        float64 `json:"recall_10"`
-	ZeroResultRate  float64 `json:"zero_result_rate"`
-	Duplicate10Rate float64 `json:"duplicate_10_rate"`
-}
-
 type Report struct {
 	SchemaVersion int           `json:"schema_version"`
-	Summary       Summary       `json:"summary"`
+	Summary       Aggregate     `json:"summary"`
 	Queries       []QueryReport `json:"queries"`
 }
 
@@ -39,30 +30,19 @@ func EvaluateGolden(ctx context.Context, searcher Searcher, set GoldenSet) (Repo
 	if err := set.Validate(); err != nil { return Report{}, err }
 
 	report := Report{SchemaVersion: 1, Queries: make([]QueryReport, 0, len(set.Queries))}
+	allMetrics := make([]Metrics, 0, len(set.Queries))
 	for _, golden := range set.Queries {
+		// Unjudged seed queries are intentionally skipped. Treating them as zero
+		// relevance would manufacture a regression before human judgments exist.
 		if len(golden.Judgments) == 0 { continue }
 		response, err := searcher.Search(ctx, searchsvc.Request{Query: golden.Query, Limit: 20})
 		if err != nil { return Report{}, fmt.Errorf("quality query %q: %w", golden.ID, err) }
 		metrics, err := evaluateURLs(response.Results, golden.Judgments)
 		if err != nil { return Report{}, fmt.Errorf("quality query %q: %w", golden.ID, err) }
 		report.Queries = append(report.Queries, QueryReport{ID: golden.ID, Query: golden.Query, Metrics: metrics, Hits: len(response.Results)})
+		allMetrics = append(allMetrics, metrics)
 	}
-	if len(report.Queries) == 0 { return report, nil }
-
-	report.Summary.JudgedQueries = len(report.Queries)
-	for _, query := range report.Queries {
-		report.Summary.NDCG10 += query.Metrics.NDCG10
-		report.Summary.MRR += query.Metrics.MRR
-		report.Summary.Recall10 += query.Metrics.Recall10
-		report.Summary.Duplicate10Rate += query.Metrics.Duplicate10
-		if query.Metrics.ZeroResult { report.Summary.ZeroResultRate++ }
-	}
-	n := float64(len(report.Queries))
-	report.Summary.NDCG10 /= n
-	report.Summary.MRR /= n
-	report.Summary.Recall10 /= n
-	report.Summary.Duplicate10Rate /= n
-	report.Summary.ZeroResultRate /= n
+	report.Summary = AggregateMetrics(allMetrics)
 	return report, nil
 }
 
