@@ -4,6 +4,7 @@ SHELL := /bin/bash
 
 dev:
 	docker compose up --build -d
+	$(MAKE) migrate
 
 down:
 	docker compose down
@@ -18,13 +19,13 @@ test-integration:
 	go test -tags=integration ./...
 
 lint:
-	@echo "TODO Sprint 01: add pinned Go lint tool" && go vet ./...
+	go vet ./...
 
 migrate:
-	@echo "TODO Sprint 01: migrations runner"
+	docker compose run --rm backend migrate
 
 rollback:
-	@echo "TODO Sprint 01: rollback command"
+	@echo "Rollback is migration-specific; destructive automatic down migrations are intentionally disabled."
 
 seed:
 	@echo "TODO Sprint 02: seed canonical data"
@@ -42,5 +43,5 @@ restore-test:
 	@echo "TODO Sprint 16: restore test"
 
 health:
-	curl -fsS http://localhost:8080/health/live && echo
-	curl -fsS http://localhost:8080/health/ready && echo
+	curl -fsS http://localhost/health/live && echo
+	curl -fsS http://localhost/health/ready && echo
