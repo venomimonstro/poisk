@@ -1,52 +1,54 @@
 # CURRENT SPRINT
 
-**Sprint:** 04 — HTTP Fetcher
+**Sprint:** 05 — Extraction + Passages + Dedup
 **Status:** IN_PROGRESS
 
 ## Goal
-Реализовать безопасный и ограниченный HTTP fetch layer поверх Sprint 03: connection reuse, redirect validation, deadlines, retries/backoff, conditional requests и response limits без утечек памяти/горутин.
+Преобразовать ограниченный HTTP body из Sprint 04 в стабильное представление документа для будущей индексации: metadata, canonical, clean text, passages, structured data и duplicate fingerprints без ranking/search logic.
 
 ## Depends On
 - Sprint 00 — PASS
 - Sprint 01 — PASS
 - Sprint 02 — PASS
 - Sprint 03 — PASS
+- Sprint 04 — PASS
 
 ## Allowed Work
-- HTTP client/transport configuration
-- connection pooling and keep-alive
-- per-request deadlines/timeouts
-- redirect handling with repeated SSRF validation
-- ETag / If-None-Match
-- Last-Modified / If-Modified-Since
-- bounded response body reads
-- Content-Length guards
-- retry policy with exponential backoff/jitter
-- Retry-After handling
-- fetch result metadata
-- unit/security/load-oriented tests
+- HTML parsing with hard input/output limits
+- title/meta description/language extraction
+- robots meta directives
+- canonical URL extraction and validation primitives
+- visible clean text extraction
+- boilerplate/noise suppression heuristics
+- structured data discovery with bounded payloads
+- passage splitting with deterministic limits
+- exact content hash
+- SimHash/near-duplicate fingerprints
+- duplicate comparison primitives
+- unit/fuzz-style boundary tests
 
 ## Forbidden Work
-- HTML/content extraction
-- passages/dedup
-- indexing/ranking/Search API
-- GEO business logic
+- writing to Manticore index
+- ranking/Search API
+- query understanding
 - Answer Engine
-- JS rendering/browser automation
+- GEO business logic
+- JavaScript/browser rendering
+- unbounded DOM or JSON processing
 
 ## Definition of Done
-- [ ] HTTP transport has bounded connection pools and idle timeouts
-- [ ] every initial and redirect target passes Sprint 03 SSRF validator
-- [ ] redirect count is bounded
-- [ ] request/header/body time budgets are bounded
-- [ ] response body cannot exceed configured hard limit
-- [ ] Content-Length oversized response is rejected early
-- [ ] ETag and Last-Modified conditional requests supported
-- [ ] 304 handled without content processing
-- [ ] transient network/429/5xx failures use bounded retry/backoff
-- [ ] Retry-After supported with maximum cap
-- [ ] response bodies are always closed
-- [ ] cancellation propagates through fetch/retry waits
-- [ ] tests cover redirects, limits, conditional headers and retries
-- [ ] no GitHub Actions/CI is added
-- [ ] Sprint 04 report created
+- [ ] HTML parser rejects oversized input before expensive processing
+- [ ] title/meta description/lang extracted deterministically
+- [ ] noindex/nofollow directives represented explicitly
+- [ ] canonical URL is parsed but not blindly trusted
+- [ ] script/style/noscript/template content excluded from clean text
+- [ ] visible text normalized without destroying word boundaries
+- [ ] structured-data payload count/size is bounded
+- [ ] passages have deterministic max chars/count and stable ordering
+- [ ] SHA-256 exact hash produced for normalized content
+- [ ] 64-bit SimHash produced for near-duplicate detection
+- [ ] Hamming-distance helper covered by tests
+- [ ] empty/thin documents handled without panic
+- [ ] package tests PASS
+- [ ] no GitHub Actions/CI added
+- [ ] Sprint 05 report created
