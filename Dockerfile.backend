@@ -9,6 +9,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/poisk /app/poisk
 COPY db/migrations /app/db/migrations
+COPY docs/quality /app/docs/quality
 USER nonroot:nonroot
 EXPOSE 8080
 ENTRYPOINT ["/app/poisk"]
