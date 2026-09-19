@@ -19,7 +19,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.27.x'
-          cache: false
+          cache: true
 
       - name: Go test
         env:
@@ -27,9 +27,10 @@ jobs:
           MIGRATIONS_DIR: ./db/migrations
         run: |
           go mod tidy
-          echo '--- BEGIN_GOSUM ---'
-          cat go.sum
-          echo '--- END_GOSUM ---'
+          echo '--- BEGIN_GOMOD ---'
+          cat go.mod
+          echo '--- END_GOMOD ---'
+          git diff --exit-code -- go.mod go.sum
           go test ./...
           go vet ./...
           go build ./cmd/app
@@ -38,7 +39,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22.19.0'
-          cache: false
 
       - name: Frontend build
         working-directory: web
