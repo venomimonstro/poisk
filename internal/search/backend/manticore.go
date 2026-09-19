@@ -38,16 +38,17 @@ type Client struct {
 }
 
 type Hit struct {
-	ID           int64
-	Score        float64
-	Title        string
-	Description  string
-	URL          string
-	Host         string
-	Lang         string
-	Snippet      string
-	QualityScore float64
-	SpamScore    float64
+	ID             int64
+	Score          float64
+	Title          string
+	Description    string
+	URL            string
+	Host           string
+	Lang           string
+	Snippet        string
+	QualityScore   float64
+	SpamScore      float64
+	AuthorityScore float64
 }
 
 type Result struct {
@@ -77,7 +78,7 @@ func (c *Client) Search(ctx context.Context, q string, limit int) (Result, error
 		"table": "web_documents",
 		"query": map[string]any{"match": map[string]any{"title,description,body": q}},
 		"limit": limit,
-		"_source": []string{"title", "description", "url", "host", "lang", "quality_score", "spam_score"},
+		"_source": []string{"title", "description", "url", "host", "lang", "quality_score", "spam_score", "authority_score"},
 		"highlight": map[string]any{
 			"fields": []string{"title", "description", "body"},
 			"before_match": "[[",
@@ -113,13 +114,14 @@ func (c *Client) Search(ctx context.Context, q string, limit int) (Result, error
 				ID     int64   `json:"_id"`
 				Score  float64 `json:"_score"`
 				Source struct {
-					Title        string  `json:"title"`
-					Description  string  `json:"description"`
-					URL          string  `json:"url"`
-					Host         string  `json:"host"`
-					Lang         string  `json:"lang"`
-					QualityScore float64 `json:"quality_score"`
-					SpamScore    float64 `json:"spam_score"`
+					Title          string  `json:"title"`
+					Description    string  `json:"description"`
+					URL            string  `json:"url"`
+					Host           string  `json:"host"`
+					Lang           string  `json:"lang"`
+					QualityScore   float64 `json:"quality_score"`
+					SpamScore      float64 `json:"spam_score"`
+					AuthorityScore float64 `json:"authority_score"`
 				} `json:"_source"`
 				Highlight map[string][]string `json:"highlight"`
 			} `json:"hits"`
@@ -134,6 +136,7 @@ func (c *Client) Search(ctx context.Context, q string, limit int) (Result, error
 			ID: h.ID, Score: h.Score, Title: h.Source.Title, Description: h.Source.Description,
 			URL: h.Source.URL, Host: h.Source.Host, Lang: h.Source.Lang, Snippet: snippet,
 			QualityScore: clampScore(h.Source.QualityScore), SpamScore: clampScore(h.Source.SpamScore),
+			AuthorityScore: clampScore(h.Source.AuthorityScore),
 		})
 	}
 	return out, nil
