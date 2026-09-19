@@ -1,10 +1,10 @@
 # CURRENT SPRINT
 
-**Sprint:** 06 — Manticore Indexing
+**Sprint:** 07 — Search Alpha
 **Status:** IN_PROGRESS
 
 ## Goal
-Реализовать идемпотентную индексацию WEB_DOCUMENT из PostgreSQL outbox в Manticore Search: schema, version ordering, UPSERT/DELETE, retry-safe worker primitives и rebuild path без ranking/search API.
+Собрать первый end-to-end WEB Search поверх Manticore: query normalization, русская раскладка/транслитерация/опечатки, bounded search transport, BM25F-oriented field query, snippets, Search API и базовый SERP без Answer Engine/GEO.
 
 ## Depends On
 - Sprint 00 — PASS
@@ -13,37 +13,40 @@
 - Sprint 03 — PASS
 - Sprint 04 — PASS
 - Sprint 05 — PASS (code/static gate; no CI added)
+- Sprint 06 — PASS (code/static gate; no CI added)
 
 ## Allowed Work
-- Manticore web index schema
-- HTTP SQL transport with bounded timeouts/body
-- typed web-document payload
-- UPSERT/REPLACE and DELETE operations
-- entity-version ordering/idempotency guards
-- PostgreSQL document loader for latest READY extraction
-- index_outbox worker primitives
-- rebuild/bulk replay command primitives
-- transport/retry/idempotency tests
+- query normalization
+- keyboard layout correction
+- transliteration variants
+- bounded typo/spelling candidates
+- Manticore WEB search request/response
+- BM25F field weighting baseline
+- snippets/highlights
+- Search API request validation
+- basic SERP frontend integration
+- bounded in-process cache
+- unit/transport tests
 
 ## Forbidden Work
-- ranking experiments/BM25 tuning
-- Search API / SERP
-- query understanding
 - Answer Engine
-- GEO business logic
-- JavaScript rendering
-- introducing Redis/Kafka/vector DB/microservices
+- LLM on every search query
+- GEO/organizations/maps
+- ranking-learning pipeline
+- vector database/embeddings
+- Redis/Kafka/microservices
 
 ## Definition of Done
-- [ ] WEB_DOCUMENT schema is explicit and versioned
-- [ ] Manticore client has bounded request timeout and response limit
-- [ ] UPSERT is deterministic for same entity/version
-- [ ] stale entity versions cannot overwrite newer indexed versions
-- [ ] DELETE is idempotent
-- [ ] latest extracted document can be loaded from PostgreSQL
-- [ ] outbox event can be applied and marked processed only after index success
-- [ ] transient index failure is retry-safe
-- [ ] rebuild path can enumerate canonical indexable documents
-- [ ] tests cover SQL escaping, version ordering, delete and transport errors
+- [ ] query normalization deterministic
+- [ ] RU/EN keyboard-layout correction bounded and tested
+- [ ] transliteration variants bounded and tested
+- [ ] empty/oversized/abusive query rejected
+- [ ] Manticore search request has hard timeout and result limit
+- [ ] title/body/description field weights are explicit
+- [ ] snippets returned without raw HTML execution
+- [ ] domain diversity baseline applied
+- [ ] Search API response has stable typed contract
+- [ ] repeated query can use bounded local cache
+- [ ] transport and query tests added
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 06 report created
+- [ ] Sprint 07 report created
