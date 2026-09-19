@@ -55,11 +55,31 @@ services:
     mem_limit: 768m
     cpus: 1.5
 
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["indexer"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      manticore:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 1.0
+
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
     restart: unless-stopped
+    environment:
+      API_INTERNAL_BASE_URL: http://backend:8080
     depends_on:
       - backend
     expose:
