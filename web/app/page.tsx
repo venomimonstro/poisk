@@ -22,7 +22,7 @@ type SearchResponse = {
   cached: boolean;
 };
 
-const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+const apiBase = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/$/, "");
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
@@ -40,16 +40,17 @@ export default function HomePage() {
     try {
       const controller = new AbortController();
       const timer = window.setTimeout(() => controller.abort(), 5000);
-      const response = await fetch(`${apiBase}/api/search?q=${encodeURIComponent(q)}&limit=10`, {
-        signal: controller.signal,
-        headers: { Accept: "application/json" },
-      });
-      window.clearTimeout(timer);
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(payload?.error || "search_failed");
+      try {
+        const response = await fetch(`${apiBase}/api/search?q=${encodeURIComponent(q)}&limit=10`, {
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error || "search_failed");
+        setData(payload as SearchResponse);
+      } finally {
+        window.clearTimeout(timer);
       }
-      setData(payload as SearchResponse);
     } catch (err) {
       setData(null);
       setError(err instanceof DOMException && err.name === "AbortError" ? "Поиск занял слишком много времени. Попробуйте ещё раз." : "Не удалось выполнить поиск. Попробуйте ещё раз.");
@@ -96,9 +97,7 @@ export default function HomePage() {
           </div>
 
           {data.results.length === 0 ? (
-            <div className="searchState">
-              Попробуйте изменить формулировку запроса или проверить раскладку клавиатуры.
-            </div>
+            <div className="searchState">Попробуйте изменить формулировку запроса или проверить раскладку клавиатуры.</div>
           ) : (
             <ol className="resultsList">
               {data.results.map((result) => (
