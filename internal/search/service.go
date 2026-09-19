@@ -76,15 +76,16 @@ func (s *Service) Search(ctx context.Context, req Request) (Response, error) {
 	return resp, nil
 }
 
-// rerank applies bounded quality/spam guardrails to the lexical score. The
-// lexical score remains dominant: quality can add at most 20%, while severe
-// spam can demote a result down to 20% of its lexical score.
+// rerank keeps BM25 dominant and applies only bounded offline signals:
+// quality contributes at most +20%, authority at most +10%, while spam can
+// demote strongly. No offline signal can turn an irrelevant zero lexical score
+// into a relevant result because all factors multiply the lexical score.
 func rerank(hits []backend.Hit) []backend.Hit {
 	out := append([]backend.Hit(nil), hits...)
 	for i := range out {
-		factor := 1 + 0.002*out[i].QualityScore - 0.008*out[i].SpamScore
+		factor := 1 + 0.002*out[i].QualityScore + 0.001*out[i].AuthorityScore - 0.008*out[i].SpamScore
 		if factor < 0.20 { factor = 0.20 }
-		if factor > 1.20 { factor = 1.20 }
+		if factor > 1.30 { factor = 1.30 }
 		out[i].Score *= factor
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
