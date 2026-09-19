@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	ErrNotFound    = errors.New("document version not found")
+	ErrNotFound     = errors.New("document version not found")
 	ErrNotIndexable = errors.New("document version is not indexable")
 )
 
@@ -39,19 +39,19 @@ type Extracted struct {
 }
 
 type Document struct {
-	ID            int64
-	Version       int64
-	Title         string
-	Description   string
-	Body          string
-	URL           string
-	Host          string
-	Lang          string
-	ContentHash   string
-	QualityScore  float64
-	SpamScore     float64
-	FetchedAt     time.Time
-	NoIndex       bool
+	ID           int64
+	Version      int64
+	Title        string
+	Description  string
+	Body         string
+	URL          string
+	Host         string
+	Lang         string
+	ContentHash  string
+	QualityScore float64
+	SpamScore    float64
+	FetchedAt    time.Time
+	NoIndex      bool
 }
 
 func (r *Repository) SaveExtracted(ctx context.Context, in Extracted) error {
@@ -117,16 +117,19 @@ SET content_hash = $3,
     index_status = CASE WHEN $5::boolean THEN 'EXCLUDED' ELSE 'NOT_INDEXED' END,
     updated_at = now()
 WHERE url_id = $1 AND version = $2`
-	if _, err := tx.Exec(ctx, updateURL, in.URLID, in.Version, in.ContentHash[:], int64(in.SimHash), in.RobotsNoIndex); err != nil {
-		return fmt.Errorf("update current URL extraction state: %w", err)
-	}
+	currentTag, err := tx.Exec(ctx, updateURL, in.URLID, in.Version, in.ContentHash[:], int64(in.SimHash), in.RobotsNoIndex)
+	if err != nil { return fmt.Errorf("update current URL extraction state: %w", err) }
 
-	const enqueue = `
+	// A slow extraction for version N may finish after the URL has already advanced
+	// to N+1. Keep the historical content, but never enqueue stale content.
+	if currentTag.RowsAffected() == 1 {
+		const enqueue = `
 INSERT INTO index_outbox (entity_type, entity_id, entity_version, operation, available_at)
 VALUES ('WEB_DOCUMENT', $1, $2, 'UPSERT', now())
 ON CONFLICT (entity_type, entity_id, entity_version) DO NOTHING`
-	if _, err := tx.Exec(ctx, enqueue, in.URLID, in.Version); err != nil {
-		return fmt.Errorf("enqueue web document index event: %w", err)
+		if _, err := tx.Exec(ctx, enqueue, in.URLID, in.Version); err != nil {
+			return fmt.Errorf("enqueue web document index event: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil { return fmt.Errorf("commit extracted document: %w", err) }
