@@ -71,6 +71,9 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string, conditional Conditio
 		result.Attempts = attempt
 		last, lastErr = result, err
 
+		if ctx.Err() != nil {
+			return Result{}, ctx.Err()
+		}
 		if err != nil && !isRetryableError(err) {
 			return result, err
 		}
@@ -79,9 +82,6 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string, conditional Conditio
 		}
 		if attempt > f.cfg.MaxRetries {
 			break
-		}
-		if ctx.Err() != nil {
-			return Result{}, ctx.Err()
 		}
 		if err := f.sleep(ctx, retryDelay(f.cfg, attempt, result.Header)); err != nil {
 			return Result{}, err
@@ -109,11 +109,15 @@ func (f *Fetcher) fetchOnce(ctx context.Context, rawURL string, conditional Cond
 		}
 		req.Header.Set("User-Agent", f.cfg.UserAgent)
 		req.Header.Set("Accept-Encoding", "identity")
-		if conditional.ETag != "" {
-			req.Header.Set("If-None-Match", conditional.ETag)
-		}
-		if conditional.LastModified != "" {
-			req.Header.Set("If-Modified-Since", conditional.LastModified)
+		// Cache validators belong to the originally scheduled URL. Do not leak
+		// them to a redirect destination where they may be unrelated metadata.
+		if redirects == 0 {
+			if conditional.ETag != "" {
+				req.Header.Set("If-None-Match", conditional.ETag)
+			}
+			if conditional.LastModified != "" {
+				req.Header.Set("If-Modified-Since", conditional.LastModified)
+			}
 		}
 
 		resp, err := f.client.Do(req)
@@ -194,7 +198,7 @@ func isRetryableStatus(status int) bool {
 }
 
 func isRetryableError(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
 	if errors.Is(err, io.ErrUnexpectedEOF) {
