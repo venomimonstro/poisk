@@ -11,7 +11,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -27,9 +27,6 @@ jobs:
           MIGRATIONS_DIR: ./db/migrations
         run: |
           go mod tidy
-          echo '--- BEGIN_GOMOD ---'
-          cat go.mod
-          echo '--- END_GOMOD ---'
           git diff --exit-code -- go.mod go.sum
           go test ./...
           go vet ./...
@@ -47,10 +44,32 @@ jobs:
           npm run lint
           npm run build
 
-      - name: Validate Docker Compose
-        env:
-          POSTGRES_PASSWORD: test
+      - name: Prepare runtime environment
         run: |
           cp .env.example .env
           sed -i 's/POSTGRES_PASSWORD=change_me/POSTGRES_PASSWORD=test/' .env
           docker compose config --quiet
+
+      - name: Build runtime images
+        run: docker compose build backend frontend
+
+      - name: Runtime smoke test
+        run: |
+          set -euo pipefail
+          docker compose up -d postgres manticore
+          docker compose run --rm backend migrate
+          docker compose up -d backend frontend nginx
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1/health/live >/dev/null && curl -fsS http://127.0.0.1/health/ready >/dev/null; then
+              curl -fsS http://127.0.0.1/health/ready
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          docker compose logs --tail=200 backend postgres manticore nginx frontend
+          exit 1
+
+      - name: Cleanup runtime
+        if: always()
+        run: docker compose down -v --remove-orphans || true
