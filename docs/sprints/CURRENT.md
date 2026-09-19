@@ -1,10 +1,10 @@
 # CURRENT SPRINT
 
-**Sprint:** 08 — Search Quality 1.0
+**Sprint:** 09 — Answer Engine 1.0
 **Status:** IN_PROGRESS
 
 ## Goal
-Сделать качество поиска измеримым и регрессионно контролируемым: golden queries, NDCG/MRR/Recall/ZeroResult, duplicate/spam signals, deterministic rerank baseline и domain diversity без Answer Engine/GEO.
+Добавить source-first Answer Engine поверх Search Alpha: passage/snippet evidence retrieval, source diversity, evidence ranking, extractive claims, citations и confidence gate. Прямой ответ разрешён только когда найдено достаточно проверяемого evidence; иначе система возвращает обычную SERP без выдуманного ответа.
 
 ## Depends On
 - Sprint 00 — PASS
@@ -15,36 +15,39 @@
 - Sprint 05 — PASS
 - Sprint 06 — PASS
 - Sprint 07 — PASS
+- Sprint 08 — PASS (code/static gate; production quality gate requires human judgments)
 
 ## Allowed Work
-- golden query dataset/schema/loader
-- relevance judgments
-- NDCG@10 / MRR / Recall@K / ZeroResult metrics
-- Duplicate@10 / domain diversity metrics
-- lightweight deterministic reranking
-- quality/spam score integration into ranking
-- evaluation runner and reports
-- regression thresholds
-- bounded tests/benchmarks
+- passage/snippet evidence retrieval from WEB Search
+- source clustering/diversity by host
+- deterministic evidence scoring
+- extractive claim selection
+- source/citation model
+- confidence calculation and minimum-evidence gate
+- Answer API contract
+- SERP answer card with cited sources
+- tests for unsupported/low-evidence cases
 
 ## Forbidden Work
-- Answer Engine
-- LLM on every search query
+- uncited generated factual claims
+- LLM call on every search request
+- answers without source URLs
 - GEO/organizations/maps
-- learned ranking model
 - vector DB/embeddings
 - Redis/Kafka/microservices
+- JavaScript browser rendering
 
 ## Definition of Done
-- [ ] golden query schema and loader implemented
-- [ ] initial golden query seed committed and extensible to 500+
-- [ ] NDCG@10 deterministic and tested
-- [ ] MRR deterministic and tested
-- [ ] Recall@K deterministic and tested
-- [ ] ZeroResult and Duplicate@10 measured
-- [ ] deterministic rerank incorporates relevance baseline + quality/spam guardrails
-- [ ] regression gate supports explicit thresholds
-- [ ] evaluation output is machine-readable
-- [ ] tests cover metric edge cases
+- [ ] evidence candidates come only from Search results
+- [ ] evidence text is bounded and HTML-free
+- [ ] at least two independent hosts required for Direct Answer
+- [ ] no single host can dominate evidence set
+- [ ] claims always reference source IDs
+- [ ] every source ID resolves to a URL returned in response
+- [ ] confidence score deterministic and bounded 0..1
+- [ ] low confidence returns fallback without Direct Answer
+- [ ] Answer API has stable typed contract
+- [ ] SERP shows answer only when confidence gate passes
+- [ ] tests cover citation integrity, diversity and fallback
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 08 report created
+- [ ] Sprint 09 report created
