@@ -1,10 +1,10 @@
 # CURRENT SPRINT
 
-**Sprint:** 09 — Answer Engine 1.0
+**Sprint:** 10 — Performance / Load Protection
 **Status:** IN_PROGRESS
 
 ## Goal
-Добавить source-first Answer Engine поверх Search Alpha: passage/snippet evidence retrieval, source diversity, evidence ranking, extractive claims, citations и confidence gate. Прямой ответ разрешён только когда найдено достаточно проверяемого evidence; иначе система возвращает обычную SERP без выдуманного ответа.
+Защитить Search/Answer API от перегрузки и дорогих запросов: end-to-end deadlines, bounded concurrency, single-flight для одинаковых запросов, rate limiting, load shedding, query complexity limits и измеримые latency/load primitives без новых инфраструктурных сервисов.
 
 ## Depends On
 - Sprint 00 — PASS
@@ -15,39 +15,39 @@
 - Sprint 05 — PASS
 - Sprint 06 — PASS
 - Sprint 07 — PASS
-- Sprint 08 — PASS (code/static gate; production quality gate requires human judgments)
+- Sprint 08 — PASS
+- Sprint 09 — PASS (code/static gate)
 
 ## Allowed Work
-- passage/snippet evidence retrieval from WEB Search
-- source clustering/diversity by host
-- deterministic evidence scoring
-- extractive claim selection
-- source/citation model
-- confidence calculation and minimum-evidence gate
-- Answer API contract
-- SERP answer card with cited sources
-- tests for unsupported/low-evidence cases
+- API request deadlines
+- bounded concurrency semaphores
+- local token-bucket/rate limiting
+- single-flight/coalescing for identical searches
+- query complexity scoring/limits
+- load shedding and 429/503 behavior
+- latency instrumentation primitives
+- cache hardening
+- bounded benchmarks/tests
+- progressive Search/Answer frontend behavior
 
 ## Forbidden Work
-- uncited generated factual claims
-- LLM call on every search request
-- answers without source URLs
-- GEO/organizations/maps
+- Redis/Kafka/RabbitMQ
+- distributed rate-limit infrastructure
+- Kubernetes/microservices
+- LLM on every query
+- GEO/maps/organizations
 - vector DB/embeddings
-- Redis/Kafka/microservices
-- JavaScript browser rendering
 
 ## Definition of Done
-- [ ] evidence candidates come only from Search results
-- [ ] evidence text is bounded and HTML-free
-- [ ] at least two independent hosts required for Direct Answer
-- [ ] no single host can dominate evidence set
-- [ ] claims always reference source IDs
-- [ ] every source ID resolves to a URL returned in response
-- [ ] confidence score deterministic and bounded 0..1
-- [ ] low confidence returns fallback without Direct Answer
-- [ ] Answer API has stable typed contract
-- [ ] SERP shows answer only when confidence gate passes
-- [ ] tests cover citation integrity, diversity and fallback
+- [ ] Search and Answer have explicit request deadlines
+- [ ] concurrent backend searches are globally bounded
+- [ ] identical concurrent Search requests are coalesced
+- [ ] per-client API rate limit is bounded in memory
+- [ ] rate limiter has bounded client-state cardinality/eviction
+- [ ] query complexity guard rejects pathological input before backend
+- [ ] overload returns deterministic 429 or 503 instead of queue explosion
+- [ ] local cache remains bounded under many unique queries
+- [ ] latency counters/histogram primitives available for P50/P95/P99 reporting
+- [ ] tests cover deadline, rate, overload, single-flight and complexity limits
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 09 report created
+- [ ] Sprint 10 report created
