@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,13 +26,13 @@ type Request struct {
 }
 
 type Response struct {
-	Query      string        `json:"query"`
-	Normalized string        `json:"normalized"`
-	UsedQuery  string        `json:"used_query"`
-	Total      int64         `json:"total"`
-	TookMS     int64         `json:"took_ms"`
-	Results    []Result      `json:"results"`
-	Cached     bool          `json:"cached"`
+	Query      string   `json:"query"`
+	Normalized string   `json:"normalized"`
+	UsedQuery  string   `json:"used_query"`
+	Total      int64    `json:"total"`
+	TookMS     int64    `json:"took_ms"`
+	Results    []Result `json:"results"`
+	Cached     bool     `json:"cached"`
 }
 
 type Result struct {
@@ -51,7 +52,7 @@ func (s *Service) Search(ctx context.Context, req Request) (Response, error) {
 	limit := req.Limit
 	if limit <= 0 { limit = 10 }
 	if limit > 20 { limit = 20 }
-	cacheKey := norm.Primary + "|" + string(rune(limit))
+	cacheKey := norm.Primary + "|" + strconv.Itoa(limit)
 	if s.Cache != nil {
 		if cached, ok := s.Cache.Get(cacheKey); ok { cached.Cached = true; return cached, nil }
 	}
