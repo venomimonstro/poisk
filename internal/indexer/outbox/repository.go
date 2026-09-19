@@ -9,7 +9,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrLeaseOwnership = errors.New("index event lease is not owned by worker")
+var (
+	ErrLeaseOwnership = errors.New("index event lease is not owned by worker")
+	ErrVersionConflict = errors.New("entity version already has a different index operation")
+)
 
 type Repository struct {
 	db *pgxpool.Pool
@@ -35,17 +38,46 @@ func (r *Repository) Enqueue(ctx context.Context, entityType string, entityID, e
 	const q = `
 INSERT INTO index_outbox (entity_type, entity_id, entity_version, operation, available_at)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (entity_type, entity_id, entity_version, operation)
+ON CONFLICT (entity_type, entity_id, entity_version)
 DO UPDATE SET
     available_at = LEAST(index_outbox.available_at, EXCLUDED.available_at),
     updated_at = now()
-RETURNING id`
+RETURNING id, operation`
 
 	var id int64
-	if err := r.db.QueryRow(ctx, q, entityType, entityID, entityVersion, operation, availableAt).Scan(&id); err != nil {
+	var storedOperation string
+	if err := r.db.QueryRow(ctx, q, entityType, entityID, entityVersion, operation, availableAt).Scan(&id, &storedOperation); err != nil {
 		return 0, fmt.Errorf("enqueue index event: %w", err)
 	}
+	if storedOperation != operation {
+		return 0, fmt.Errorf("%w: entity=%s/%d version=%d existing=%s requested=%s", ErrVersionConflict, entityType, entityID, entityVersion, storedOperation, operation)
+	}
 	return id, nil
+}
+
+func (r *Repository) SupersedeStale(ctx context.Context) (int64, error) {
+	const q = `
+UPDATE index_outbox AS stale
+SET status = 'SUPERSEDED',
+    processed_at = now(),
+    lease_until = NULL,
+    worker_id = NULL,
+    last_error = 'superseded_by_newer_version',
+    updated_at = now()
+WHERE stale.status IN ('READY','RETRY')
+  AND EXISTS (
+      SELECT 1
+      FROM index_outbox AS newer
+      WHERE newer.entity_type = stale.entity_type
+        AND newer.entity_id = stale.entity_id
+        AND newer.entity_version > stale.entity_version
+  )`
+
+	tag, err := r.db.Exec(ctx, q)
+	if err != nil {
+		return 0, fmt.Errorf("supersede stale index events: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *Repository) Lease(ctx context.Context, workerID string, batchSize, leaseSeconds int32) ([]Event, error) {
@@ -56,15 +88,33 @@ func (r *Repository) Lease(ctx context.Context, workerID string, batchSize, leas
 		return nil, errors.New("batch size and lease seconds must be positive")
 	}
 
+	if _, err := r.SupersedeStale(ctx); err != nil {
+		return nil, err
+	}
+
 	const q = `
 WITH picked AS (
-    SELECT id
-    FROM index_outbox
-    WHERE status IN ('READY','RETRY')
-      AND available_at <= now()
-      AND attempts < max_attempts
-    ORDER BY available_at ASC, id ASC
-    FOR UPDATE SKIP LOCKED
+    SELECT candidate.id
+    FROM index_outbox AS candidate
+    WHERE candidate.status IN ('READY','RETRY')
+      AND candidate.available_at <= now()
+      AND candidate.attempts < candidate.max_attempts
+      AND NOT EXISTS (
+          SELECT 1
+          FROM index_outbox AS newer
+          WHERE newer.entity_type = candidate.entity_type
+            AND newer.entity_id = candidate.entity_id
+            AND newer.entity_version > candidate.entity_version
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM index_outbox AS held
+          WHERE held.entity_type = candidate.entity_type
+            AND held.entity_id = candidate.entity_id
+            AND held.status = 'LEASED'
+      )
+    ORDER BY candidate.available_at ASC, candidate.id ASC
+    FOR UPDATE OF candidate SKIP LOCKED
     LIMIT $1
 )
 UPDATE index_outbox AS o
