@@ -9,21 +9,23 @@ import (
 )
 
 type Config struct {
-	Env             string
-	Addr            string
-	ShutdownTimeout time.Duration
-	LogLevel        string
-	PostgresDSN     string
-	ManticoreHost   string
+	Env              string
+	Addr             string
+	ShutdownTimeout  time.Duration
+	LogLevel         string
+	PostgresDSN      string
+	ManticoreHost    string
 	ManticoreSQLPort int
+	MigrationsDir    string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Env:       getenv("APP_ENV", "development"),
-		Addr:      getenv("APP_ADDR", ":8080"),
-		LogLevel:  getenv("LOG_LEVEL", "info"),
+		Env:           getenv("APP_ENV", "development"),
+		Addr:          getenv("APP_ADDR", ":8080"),
+		LogLevel:      getenv("LOG_LEVEL", "info"),
 		ManticoreHost: getenv("MANTICORE_HOST", "manticore"),
+		MigrationsDir: getenv("MIGRATIONS_DIR", "/app/db/migrations"),
 	}
 
 	shutdown, err := time.ParseDuration(getenv("APP_SHUTDOWN_TIMEOUT", "10s"))
@@ -47,6 +49,9 @@ func Load() (Config, error) {
 
 	if password == "" {
 		return Config{}, errors.New("POSTGRES_PASSWORD is required")
+	}
+	if cfg.MigrationsDir == "" {
+		return Config{}, errors.New("MIGRATIONS_DIR is required")
 	}
 
 	cfg.PostgresDSN = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s", user, password, host, pgPort, db, sslMode)
