@@ -1,0 +1,48 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	answersvc "github.com/venomimonstro/poisk/internal/answer"
+	querynorm "github.com/venomimonstro/poisk/internal/query"
+)
+
+type Answerer interface {
+	Answer(ctx context.Context, req answersvc.Request) (answersvc.Response, error)
+}
+
+type Handler struct {
+	AnswerService Answerer
+}
+
+func (h Handler) Answer(w http.ResponseWriter, r *http.Request) {
+	if h.AnswerService == nil {
+		writeError(w, http.StatusServiceUnavailable, "answer_unavailable")
+		return
+	}
+	resp, err := h.AnswerService.Answer(r.Context(), answersvc.Request{Query: r.URL.Query().Get("q")})
+	if err != nil {
+		switch {
+		case errors.Is(err, querynorm.ErrEmptyQuery):
+			writeError(w, http.StatusBadRequest, "empty_query")
+		case errors.Is(err, querynorm.ErrQueryTooLong), errors.Is(err, querynorm.ErrInvalidQuery):
+			writeError(w, http.StatusBadRequest, "invalid_query")
+		default:
+			writeError(w, http.StatusBadGateway, "answer_backend_error")
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func writeError(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
