@@ -20,7 +20,7 @@ func TestQuoteEscapesSQLLiteral(t *testing.T) {
 
 func TestCurrentVersionParsesRawResultSet(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `[{"columns":[{"entity_version":{"type":"long long"}}],"data":[{"entity_version":7}],"total":1,"error":"","warning":""}]`)
+		_, _ = io.WriteString(w, "[{\"columns\":[{\"entity_version\":{\"type\":\"long long\"}}],\"data\":[{\"entity_version\":7}],\"total\":1,\"error\":\"\",\"warning\":\"\"}]")
 	}))
 	defer srv.Close()
 	c, err := New(Config{BaseURL: srv.URL})
@@ -37,7 +37,7 @@ func TestApplySkipsStaleVersion(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		if calls == 1 {
 			if !strings.Contains(string(body), "SELECT entity_version") { t.Fatalf("query=%s", body) }
-			_, _ = io.WriteString(w, `[{"data":[{"entity_version":9}],"total":1,"error":"","warning":""}]`)
+			_, _ = io.WriteString(w, "[{\"data\":[{\"entity_version\":9}],\"total\":1,\"error\":\"\",\"warning\":\"\"}]")
 			return
 		}
 		t.Fatalf("stale document triggered mutation: %s", body)
@@ -56,26 +56,58 @@ func TestApplyReplacesEqualOrNewerVersion(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		queries = append(queries, string(body))
 		if len(queries) == 1 {
-			_, _ = io.WriteString(w, `[{"data":[{"entity_version":"3"}],"total":1,"error":"","warning":""}]`)
+			_, _ = io.WriteString(w, "[{\"data\":[{\"entity_version\":\"3\"}],\"total\":1,\"error\":\"\",\"warning\":\"\"}]")
 			return
 		}
-		_, _ = io.WriteString(w, `[{"total":0,"error":"","warning":""}]`)
+		_, _ = io.WriteString(w, "[{\"total\":0,\"error\":\"\",\"warning\":\"\"}]")
 	}))
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL})
-	ok, err := c.Apply(context.Background(), Document{ID: 5, EntityVersion: 4, Title: "O'Reilly", Body: "body"})
+	ok, err := c.Apply(context.Background(), Document{ID: 5, EntityVersion: 4, Title: "O'Reilly", Body: "body", AuthorityScore: 25})
 	if err != nil { t.Fatal(err) }
 	if !ok { t.Fatal("expected apply") }
-	if len(queries) != 2 || !strings.Contains(queries[1], "REPLACE INTO web_documents") || !strings.Contains(queries[1], "O\\'Reilly") {
+	if len(queries) != 2 || !strings.Contains(queries[1], "REPLACE INTO web_documents") || !strings.Contains(queries[1], "O\\'Reilly") || !strings.Contains(queries[1], "authority_score") {
 		t.Fatalf("queries=%v", queries)
 	}
+}
+
+func TestEnsureSchemaAddsAuthorityOnlyWhenMissing(t *testing.T) {
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		q := string(body)
+		queries = append(queries, q)
+		switch {
+		case strings.HasPrefix(q, "CREATE TABLE"):
+			_, _ = io.WriteString(w, "[{\"total\":0,\"error\":\"\",\"warning\":\"\"}]")
+		case strings.HasPrefix(q, "DESC "):
+			_, _ = io.WriteString(w, "[{\"data\":[{\"Field\":\"id\",\"Type\":\"bigint\"},{\"Field\":\"quality_score\",\"Type\":\"float\"}],\"error\":\"\",\"warning\":\"\"}]")
+		case strings.HasPrefix(q, "ALTER TABLE"):
+			_, _ = io.WriteString(w, "[{\"total\":0,\"error\":\"\",\"warning\":\"\"}]")
+		default:
+			t.Fatalf("unexpected query %q", q)
+		}
+	}))
+	defer srv.Close()
+	c, _ := New(Config{BaseURL: srv.URL})
+	if err := c.EnsureSchema(context.Background()); err != nil { t.Fatal(err) }
+	if len(queries) != 3 || !strings.Contains(queries[2], "ADD COLUMN authority_score FLOAT") {
+		t.Fatalf("queries=%v", queries)
+	}
+}
+
+func TestRawHasColumnIsCaseInsensitive(t *testing.T) {
+	body := []byte("[{\"data\":[{\"Field\":\"AUTHORITY_SCORE\"}],\"error\":\"\"}]")
+	has, err := rawHasColumn(body, "authority_score")
+	if err != nil { t.Fatal(err) }
+	if !has { t.Fatal("expected authority column") }
 }
 
 func TestDeleteIsDeterministic(t *testing.T) {
 	var query string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body); query = string(b)
-		_, _ = io.WriteString(w, `[{"total":0,"error":"","warning":""}]`)
+		_, _ = io.WriteString(w, "[{\"total\":0,\"error\":\"\",\"warning\":\"\"}]")
 	}))
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL})
@@ -97,7 +129,7 @@ func TestResponseHardLimit(t *testing.T) {
 func TestRequestTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(50 * time.Millisecond)
-		_, _ = io.WriteString(w, `[]`)
+		_, _ = io.WriteString(w, "[]")
 	}))
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL, RequestTimeout: 5 * time.Millisecond})
