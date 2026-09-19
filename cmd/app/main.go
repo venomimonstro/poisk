@@ -15,6 +15,10 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	indexmanticore "github.com/venomimonstro/poisk/internal/indexer/manticore"
+	"github.com/venomimonstro/poisk/internal/indexer/outbox"
+	"github.com/venomimonstro/poisk/internal/indexer/source"
+	indexworker "github.com/venomimonstro/poisk/internal/indexer/worker"
 	"github.com/venomimonstro/poisk/internal/platform/config"
 	"github.com/venomimonstro/poisk/internal/platform/health"
 	"github.com/venomimonstro/poisk/internal/platform/migrate"
@@ -24,7 +28,7 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("application stopped", "error", err)
 		os.Exit(1)
 	}
@@ -52,6 +56,8 @@ func run() error {
 		return nil
 	case "api":
 		return runAPI(cfg, pool)
+	case "indexer":
+		return runIndexer(cfg, pool)
 	default:
 		return fmt.Errorf("runtime mode %q is not implemented in current sprint", mode)
 	}
@@ -60,9 +66,7 @@ func run() error {
 func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	checker := health.Checker{DB: pool, ManticoreHost: cfg.ManticoreHost, ManticoreSQLPort: cfg.ManticoreSQLPort}
 
-	searchBackend, err := searchbackend.New(searchbackend.Config{
-		BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort),
-	})
+	searchBackend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create search backend: %w", err) }
 	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512)}
 	searchHandler := searchhttp.Handler{SearchService: searchService}
@@ -103,4 +107,33 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	return server.Shutdown(shutdownCtx)
+}
+
+func runIndexer(cfg config.Config, pool *pgxpool.Pool) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	index, err := indexmanticore.New(indexmanticore.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
+	if err != nil { return fmt.Errorf("create manticore index client: %w", err) }
+	if err := index.EnsureSchema(ctx); err != nil { return fmt.Errorf("ensure web index schema: %w", err) }
+
+	outboxRepo := outbox.NewRepository(pool)
+	sourceRepo := source.NewRepository(pool)
+	processor := &indexworker.Processor{
+		Source: sourceRepo,
+		Index: index,
+		Ack: outboxRepo,
+		RetryBase: time.Second,
+		RetryMax: time.Minute,
+	}
+	runner := indexworker.Runner{
+		Leases: outboxRepo,
+		Processor: processor,
+		WorkerID: fmt.Sprintf("indexer-%d", os.Getpid()),
+		BatchSize: 32,
+		LeaseSeconds: 30,
+		PollInterval: 500 * time.Millisecond,
+	}
+	slog.Info("indexer worker started", "worker_id", runner.WorkerID)
+	return runner.Run(ctx)
 }
