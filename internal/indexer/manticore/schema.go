@@ -2,11 +2,12 @@ package manticore
 
 const (
 	WebIndex         = "web_documents"
-	WebSchemaVersion = 1
+	WebSchemaVersion = 2
 )
 
-// WebSchemaSQL is intentionally explicit. Schema changes require a version bump
-// and an explicit rebuild instead of silent runtime mutation.
+// WebSchemaSQL is the bootstrap schema for a fresh table. Existing RT tables
+// are upgraded explicitly by EnsureSchema so CREATE IF NOT EXISTS never hides
+// a missing attribute.
 const WebSchemaSQL = `CREATE TABLE IF NOT EXISTS web_documents (
     title text indexed stored,
     description text indexed stored,
@@ -18,20 +19,22 @@ const WebSchemaSQL = `CREATE TABLE IF NOT EXISTS web_documents (
     entity_version bigint,
     quality_score float,
     spam_score float,
+    authority_score float,
     fetched_at timestamp
 ) morphology='stem_enru' min_word_len='2'`
 
 type Document struct {
-	ID            int64
-	EntityVersion int64
-	Title         string
-	Description   string
-	Body          string
-	URL           string
-	Host          string
-	Lang          string
-	ContentHash   string
-	QualityScore  float64
-	SpamScore     float64
-	FetchedAtUnix int64
+	ID             int64
+	EntityVersion  int64
+	Title          string
+	Description    string
+	Body           string
+	URL            string
+	Host           string
+	Lang           string
+	ContentHash    string
+	QualityScore   float64
+	SpamScore      float64
+	AuthorityScore float64
+	FetchedAtUnix  int64
 }
