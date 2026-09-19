@@ -39,19 +39,20 @@ type Extracted struct {
 }
 
 type Document struct {
-	ID           int64
-	Version      int64
-	Title        string
-	Description  string
-	Body         string
-	URL          string
-	Host         string
-	Lang         string
-	ContentHash  string
-	QualityScore float64
-	SpamScore    float64
-	FetchedAt    time.Time
-	NoIndex      bool
+	ID             int64
+	Version        int64
+	Title          string
+	Description    string
+	Body           string
+	URL            string
+	Host           string
+	Lang           string
+	ContentHash    string
+	QualityScore   float64
+	SpamScore      float64
+	AuthorityScore float64
+	FetchedAt      time.Time
+	NoIndex        bool
 }
 
 func (r *Repository) SaveExtracted(ctx context.Context, in Extracted) error {
@@ -120,8 +121,6 @@ WHERE url_id = $1 AND version = $2`
 	currentTag, err := tx.Exec(ctx, updateURL, in.URLID, in.Version, in.ContentHash[:], int64(in.SimHash), in.RobotsNoIndex)
 	if err != nil { return fmt.Errorf("update current URL extraction state: %w", err) }
 
-	// A slow extraction for version N may finish after the URL has already advanced
-	// to N+1. Keep the historical content, but never enqueue stale content.
 	if currentTag.RowsAffected() == 1 {
 		const enqueue = `
 INSERT INTO index_outbox (entity_type, entity_id, entity_version, operation, available_at)
@@ -151,6 +150,7 @@ SELECT
     encode(dc.content_hash, 'hex'),
     u.quality_score,
     u.spam_score,
+    d.authority_score,
     dc.fetched_at,
     dc.robots_noindex
 FROM document_content dc
@@ -163,7 +163,7 @@ WHERE dc.url_id = $1
 	var out Document
 	err := r.db.QueryRow(ctx, q, urlID, version).Scan(
 		&out.ID, &out.Version, &out.Title, &out.Description, &out.Body, &out.URL, &out.Host,
-		&out.Lang, &out.ContentHash, &out.QualityScore, &out.SpamScore, &out.FetchedAt, &out.NoIndex,
+		&out.Lang, &out.ContentHash, &out.QualityScore, &out.SpamScore, &out.AuthorityScore, &out.FetchedAt, &out.NoIndex,
 	)
 	if errors.Is(err, pgx.ErrNoRows) { return Document{}, ErrNotFound }
 	if err != nil { return Document{}, fmt.Errorf("load document version: %w", err) }
@@ -187,6 +187,7 @@ SELECT DISTINCT ON (u.url_id)
     encode(dc.content_hash, 'hex'),
     u.quality_score,
     u.spam_score,
+    d.authority_score,
     dc.fetched_at,
     dc.robots_noindex
 FROM urls u
@@ -208,7 +209,7 @@ LIMIT $2`
 		var doc Document
 		if err := rows.Scan(
 			&doc.ID, &doc.Version, &doc.Title, &doc.Description, &doc.Body, &doc.URL, &doc.Host,
-			&doc.Lang, &doc.ContentHash, &doc.QualityScore, &doc.SpamScore, &doc.FetchedAt, &doc.NoIndex,
+			&doc.Lang, &doc.ContentHash, &doc.QualityScore, &doc.SpamScore, &doc.AuthorityScore, &doc.FetchedAt, &doc.NoIndex,
 		); err != nil { return nil, fmt.Errorf("scan rebuild document: %w", err) }
 		out = append(out, doc)
 	}
