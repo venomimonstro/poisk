@@ -16,6 +16,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	answersvc "github.com/venomimonstro/poisk/internal/answer"
+	answerhttp "github.com/venomimonstro/poisk/internal/answer/httpapi"
 	indexmanticore "github.com/venomimonstro/poisk/internal/indexer/manticore"
 	"github.com/venomimonstro/poisk/internal/indexer/outbox"
 	"github.com/venomimonstro/poisk/internal/indexer/source"
@@ -74,6 +76,8 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	if err != nil { return fmt.Errorf("create search backend: %w", err) }
 	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512)}
 	searchHandler := searchhttp.Handler{SearchService: searchService}
+	answerService := &answersvc.Service{Search: searchService, MinConfidence: answersvc.DefaultMinConfidence}
+	answerHandler := answerhttp.Handler{AnswerService: answerService}
 
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
@@ -82,6 +86,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	router.Get("/health/live", checker.Live)
 	router.Get("/health/ready", checker.Ready)
 	router.Get("/api/search", searchHandler.Search)
+	router.Get("/api/answer", answerHandler.Answer)
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
