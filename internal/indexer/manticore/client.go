@@ -47,11 +47,9 @@ func New(cfg Config) (*Client, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("invalid manticore base URL")
 	}
-	return &Client{
-		baseURL: u.String(),
-		maxBody: cfg.MaxResponseBytes,
-		http: &http.Client{Timeout: cfg.RequestTimeout},
-	}, nil
+	client := &http.Client{Timeout: cfg.RequestTimeout}
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	return &Client{baseURL: u.String(), maxBody: cfg.MaxResponseBytes, http: client}, nil
 }
 
 func (c *Client) EnsureSchema(ctx context.Context) error {
@@ -65,17 +63,13 @@ func (c *Client) Apply(ctx context.Context, doc Document) (bool, error) {
 	}
 	current, exists, err := c.CurrentVersion(ctx, doc.ID)
 	if err != nil { return false, err }
-	if exists && current > doc.EntityVersion {
-		return false, nil
-	}
+	if exists && current > doc.EntityVersion { return false, nil }
+
 	q := "REPLACE INTO " + WebIndex + " (id,title,description,body,url,host,lang,content_hash,entity_version,quality_score,spam_score,fetched_at) VALUES (" +
-		strconv.FormatInt(doc.ID, 10) + "," +
-		quote(doc.Title) + "," + quote(doc.Description) + "," + quote(doc.Body) + "," +
+		strconv.FormatInt(doc.ID, 10) + "," + quote(doc.Title) + "," + quote(doc.Description) + "," + quote(doc.Body) + "," +
 		quote(doc.URL) + "," + quote(doc.Host) + "," + quote(doc.Lang) + "," + quote(doc.ContentHash) + "," +
-		strconv.FormatInt(doc.EntityVersion, 10) + "," +
-		strconv.FormatFloat(doc.QualityScore, 'f', -1, 64) + "," +
-		strconv.FormatFloat(doc.SpamScore, 'f', -1, 64) + "," +
-		strconv.FormatInt(doc.FetchedAtUnix, 10) + ")"
+		strconv.FormatInt(doc.EntityVersion, 10) + "," + strconv.FormatFloat(doc.QualityScore, 'f', -1, 64) + "," +
+		strconv.FormatFloat(doc.SpamScore, 'f', -1, 64) + "," + strconv.FormatInt(doc.FetchedAtUnix, 10) + ")"
 	_, err = c.execSQL(ctx, q)
 	return err == nil, err
 }
@@ -96,12 +90,8 @@ func (c *Client) CurrentVersion(ctx context.Context, id int64) (int64, bool, err
 	body, err := c.execSQL(ctx, "SELECT entity_version FROM "+WebIndex+" WHERE id="+strconv.FormatInt(id, 10)+" LIMIT 1")
 	if err != nil { return 0, false, err }
 	var sets []rawResultSet
-	if err := json.Unmarshal(body, &sets); err != nil {
-		return 0, false, fmt.Errorf("decode current version: %w", err)
-	}
-	if len(sets) == 0 { return 0, false, nil }
-	if sets[0].Error != "" { return 0, false, fmt.Errorf("%w: %s", ErrRemote, sets[0].Error) }
-	if len(sets[0].Data) == 0 { return 0, false, nil }
+	if err := json.Unmarshal(body, &sets); err != nil { return 0, false, fmt.Errorf("decode current version: %w", err) }
+	if len(sets) == 0 || len(sets[0].Data) == 0 { return 0, false, nil }
 	raw, ok := sets[0].Data[0]["entity_version"]
 	if !ok { return 0, false, errors.New("manticore version result missing entity_version") }
 	var version int64
@@ -128,18 +118,25 @@ func (c *Client) execSQL(ctx context.Context, query string) ([]byte, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("%w: status=%d body=%s", ErrRemote, resp.StatusCode, truncate(string(body), 512))
 	}
+	if err := validateRawResponse(body); err != nil { return nil, err }
 	return body, nil
 }
 
+func validateRawResponse(body []byte) error {
+	var sets []rawResultSet
+	if err := json.Unmarshal(body, &sets); err != nil {
+		return fmt.Errorf("decode manticore raw response: %w", err)
+	}
+	for _, set := range sets {
+		if strings.TrimSpace(set.Error) != "" {
+			return fmt.Errorf("%w: %s", ErrRemote, truncate(set.Error, 512))
+		}
+	}
+	return nil
+}
+
 func quote(s string) string {
-	r := strings.NewReplacer(
-		"\\", "\\\\",
-		"'", "\\'",
-		"\x00", "",
-		"\n", "\\n",
-		"\r", "\\r",
-		"\t", "\\t",
-	)
+	r := strings.NewReplacer("\\", "\\\\", "'", "\\'", "\x00", "", "\n", "\\n", "\r", "\\r", "\t", "\\t")
 	return "'" + r.Replace(s) + "'"
 }
 
