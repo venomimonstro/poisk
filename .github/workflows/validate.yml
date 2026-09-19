@@ -1,0 +1,54 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache: true
+
+      - name: Go test
+        env:
+          POSTGRES_PASSWORD: test
+          MIGRATIONS_DIR: ./db/migrations
+        run: |
+          go mod download
+          go test ./...
+          go vet ./...
+          go build ./cmd/app
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+          cache-dependency-path: web/package.json
+
+      - name: Frontend build
+        working-directory: web
+        run: |
+          npm install --ignore-scripts
+          npm run lint
+          npm run build
+
+      - name: Validate Docker Compose
+        env:
+          POSTGRES_PASSWORD: test
+        run: |
+          cp .env.example .env
+          sed -i 's/POSTGRES_PASSWORD=change_me/POSTGRES_PASSWORD=test/' .env
+          docker compose config --quiet
