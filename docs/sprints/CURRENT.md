@@ -1,38 +1,43 @@
 # CURRENT SPRINT
 
-**Sprint:** 00 — Project Contract
+**Sprint:** 01 — Runtime Foundation
 **Status:** IN_PROGRESS
 
 ## Goal
-Зафиксировать единый контракт разработки проекта до реализации бизнес-логики.
+Собрать минимальный production-minded runtime, который поднимается одной командой и проверяет зависимости через readiness.
 
 ## Depends On
-Нет.
+Sprint 00 — PASS.
 
 ## Allowed Work
-- MASTER_PROJECT.md
-- README.md
-- ADR protocol
-- sprint protocol
-- Makefile
-- .gitignore
-- .env.example
-- coding/config/logging/version rules
+- Docker Compose
+- Nginx
+- Go application skeleton
+- Next.js skeleton
+- PostgreSQL/PostGIS
+- Manticore
+- migrations framework
+- typed config
+- structured logging
+- `/health/live`
+- `/health/ready`
 
 ## Forbidden Work
 - crawler business logic
-- search ranking
+- ranking
 - GEO business logic
-- Answer Engine implementation
+- Answer Engine
+- Redis/Kafka/Kubernetes/другие неутверждённые компоненты
 
 ## Definition of Done
-- [x] MASTER_PROJECT.md добавлен
-- [x] README.md добавлен
-- [x] ADR template добавлен
-- [ ] Sprint template добавлен
-- [ ] Makefile добавлен
-- [ ] .gitignore добавлен
-- [ ] .env.example добавлен
-- [ ] Sprint 00 report создан
-
-Следующий спринт начинается только после PASS всех пунктов DoD.
+- [ ] `docker compose up --build -d` запускает стек
+- [ ] backend компилируется
+- [ ] frontend компилируется
+- [ ] PostgreSQL healthcheck работает
+- [ ] Manticore healthcheck работает
+- [ ] `/health/live` возвращает 200
+- [ ] `/health/ready` проверяет критические зависимости
+- [ ] config валидируется при старте
+- [ ] structured logs работают
+- [ ] unit tests PASS
+- [ ] Sprint 01 report создан
