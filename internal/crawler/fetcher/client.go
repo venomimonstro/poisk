@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -69,6 +70,10 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string, conditional Conditio
 		result, err := f.fetchOnce(ctx, rawURL, conditional)
 		result.Attempts = attempt
 		last, lastErr = result, err
+
+		if err != nil && !isRetryableError(err) {
+			return result, err
+		}
 		if err == nil && !isRetryableStatus(result.StatusCode) {
 			return result, nil
 		}
@@ -186,6 +191,17 @@ func isRetryableStatus(status int) bool {
 		return true
 	}
 	return status >= 500 && status <= 599
+}
+
+func isRetryableError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 func resolveRedirect(base *url.URL, location string) (string, error) {
