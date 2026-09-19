@@ -37,6 +37,7 @@ func New(cfg Config, validator TargetValidator) *Fetcher {
 	transport.ResponseHeaderTimeout = cfg.ResponseHeaderTimeout
 	transport.TLSHandshakeTimeout = minDuration(10*time.Second, cfg.RequestTimeout)
 	transport.ExpectContinueTimeout = time.Second
+	transport.DialContext = validatedDialContext(validator, cfg.RequestTimeout)
 
 	return &Fetcher{
 		cfg:       cfg,
@@ -62,7 +63,6 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string, conditional Conditio
 	if f == nil || f.validator == nil || f.client == nil {
 		return Result{}, errors.New("fetcher is not initialized")
 	}
-
 	var last Result
 	var lastErr error
 	for attempt := 1; attempt <= f.cfg.MaxRetries+1; attempt++ {
@@ -94,12 +94,10 @@ func (f *Fetcher) fetchOnce(ctx context.Context, rawURL string, conditional Cond
 		if redirects > f.cfg.MaxRedirects {
 			return Result{}, ErrTooManyRedirects
 		}
-
 		target, err := f.validator.Validate(ctx, current)
 		if err != nil {
 			return Result{}, fmt.Errorf("validate target %q: %w", current, err)
 		}
-
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL.String(), nil)
 		if err != nil {
 			return Result{}, err
@@ -117,7 +115,6 @@ func (f *Fetcher) fetchOnce(ctx context.Context, rawURL string, conditional Cond
 		if err != nil {
 			return Result{}, err
 		}
-
 		if isRedirect(resp.StatusCode) {
 			location := resp.Header.Get("Location")
 			drainAndClose(resp.Body)
@@ -132,12 +129,7 @@ func (f *Fetcher) fetchOnce(ctx context.Context, rawURL string, conditional Cond
 			continue
 		}
 
-		result := Result{
-			StatusCode: resp.StatusCode,
-			Header:     resp.Header.Clone(),
-			FinalURL:   target.URL.String(),
-			FetchedAt:  time.Now().UTC(),
-		}
+		result := Result{StatusCode: resp.StatusCode, Header: resp.Header.Clone(), FinalURL: target.URL.String(), FetchedAt: time.Now().UTC()}
 		if resp.StatusCode == http.StatusNotModified {
 			drainAndClose(resp.Body)
 			result.NotModified = true
@@ -147,7 +139,6 @@ func (f *Fetcher) fetchOnce(ctx context.Context, rawURL string, conditional Cond
 			drainAndClose(resp.Body)
 			return result, ErrBodyTooLarge
 		}
-
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, f.cfg.MaxBodyBytes+1))
 		closeErr := resp.Body.Close()
 		if readErr != nil {
