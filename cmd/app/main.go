@@ -18,6 +18,9 @@ import (
 	"github.com/venomimonstro/poisk/internal/platform/config"
 	"github.com/venomimonstro/poisk/internal/platform/health"
 	"github.com/venomimonstro/poisk/internal/platform/migrate"
+	searchsvc "github.com/venomimonstro/poisk/internal/search"
+	searchbackend "github.com/venomimonstro/poisk/internal/search/backend"
+	searchhttp "github.com/venomimonstro/poisk/internal/search/httpapi"
 )
 
 func main() {
@@ -29,30 +32,22 @@ func main() {
 
 func run() error {
 	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
 	mode := "api"
-	if len(os.Args) > 1 {
-		mode = os.Args[1]
-	}
+	if len(os.Args) > 1 { mode = os.Args[1] }
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.PostgresDSN)
-	if err != nil {
-		return fmt.Errorf("create postgres pool: %w", err)
-	}
+	if err != nil { return fmt.Errorf("create postgres pool: %w", err) }
 	defer pool.Close()
 
 	switch mode {
 	case "migrate":
-		if err := migrate.Up(ctx, pool, cfg.MigrationsDir); err != nil {
-			return err
-		}
+		if err := migrate.Up(ctx, pool, cfg.MigrationsDir); err != nil { return err }
 		slog.Info("migrations applied")
 		return nil
 	case "api":
@@ -63,11 +58,14 @@ func run() error {
 }
 
 func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
-	checker := health.Checker{
-		DB:               pool,
-		ManticoreHost:    cfg.ManticoreHost,
-		ManticoreSQLPort: cfg.ManticoreSQLPort,
-	}
+	checker := health.Checker{DB: pool, ManticoreHost: cfg.ManticoreHost, ManticoreSQLPort: cfg.ManticoreSQLPort}
+
+	searchBackend, err := searchbackend.New(searchbackend.Config{
+		BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort),
+	})
+	if err != nil { return fmt.Errorf("create search backend: %w", err) }
+	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512)}
+	searchHandler := searchhttp.Handler{SearchService: searchService}
 
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
@@ -75,6 +73,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	router.Use(middleware.Recoverer)
 	router.Get("/health/live", checker.Live)
 	router.Get("/health/ready", checker.Ready)
+	router.Get("/api/search", searchHandler.Search)
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
@@ -98,9 +97,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	case <-sigCtx.Done():
 		slog.Info("shutdown signal received")
 	case err := <-serverErr:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) { return err }
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
