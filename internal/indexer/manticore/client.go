@@ -1,7 +1,6 @@
 package manticore
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -87,17 +86,31 @@ func (c *Client) Delete(ctx context.Context, id int64) error {
 	return err
 }
 
+type rawResultSet struct {
+	Data  []map[string]json.RawMessage `json:"data"`
+	Error string                       `json:"error"`
+}
+
 func (c *Client) CurrentVersion(ctx context.Context, id int64) (int64, bool, error) {
 	if id <= 0 { return 0, false, errors.New("document id must be positive") }
 	body, err := c.execSQL(ctx, "SELECT entity_version FROM "+WebIndex+" WHERE id="+strconv.FormatInt(id, 10)+" LIMIT 1")
 	if err != nil { return 0, false, err }
-	var rows []struct { EntityVersion int64 `json:"entity_version"` }
-	if len(bytes.TrimSpace(body)) == 0 { return 0, false, nil }
-	if err := json.Unmarshal(body, &rows); err != nil {
+	var sets []rawResultSet
+	if err := json.Unmarshal(body, &sets); err != nil {
 		return 0, false, fmt.Errorf("decode current version: %w", err)
 	}
-	if len(rows) == 0 { return 0, false, nil }
-	return rows[0].EntityVersion, true, nil
+	if len(sets) == 0 { return 0, false, nil }
+	if sets[0].Error != "" { return 0, false, fmt.Errorf("%w: %s", ErrRemote, sets[0].Error) }
+	if len(sets[0].Data) == 0 { return 0, false, nil }
+	raw, ok := sets[0].Data[0]["entity_version"]
+	if !ok { return 0, false, errors.New("manticore version result missing entity_version") }
+	var version int64
+	if err := json.Unmarshal(raw, &version); err == nil { return version, true, nil }
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil { return 0, false, fmt.Errorf("decode entity_version: %w", err) }
+	version, err = strconv.ParseInt(text, 10, 64)
+	if err != nil { return 0, false, fmt.Errorf("parse entity_version: %w", err) }
+	return version, true, nil
 }
 
 func (c *Client) execSQL(ctx context.Context, query string) ([]byte, error) {
@@ -119,7 +132,6 @@ func (c *Client) execSQL(ctx context.Context, query string) ([]byte, error) {
 }
 
 func quote(s string) string {
-	// Manticore SQL string literal escaping: backslash first, then quote and control characters.
 	r := strings.NewReplacer(
 		"\\", "\\\\",
 		"'", "\\'",
