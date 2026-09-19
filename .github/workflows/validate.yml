@@ -11,7 +11,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +32,9 @@ jobs:
           go vet ./...
           go build ./cmd/app
 
+      - name: Validate SQL contract
+        run: go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 compile
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -50,37 +53,45 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/POSTGRES_PASSWORD=change_me/POSTGRES_PASSWORD=test/' .env
-          docker compose config --quiet
+          docker compose -f docker-compose.yml -f .github/docker-compose.test.yml config --quiet
 
       - name: Build runtime images
-        run: docker compose build backend frontend
+        run: docker compose -f docker-compose.yml -f .github/docker-compose.test.yml build backend frontend
 
-      - name: Runtime smoke test
+      - name: Runtime and integration smoke test
+        env:
+          TEST_DATABASE_URL: postgres://poisk:test@127.0.0.1:15432/poisk?sslmode=disable
         run: |
           set -euo pipefail
-          trap 'docker compose ps || true; docker compose logs --tail=200 postgres manticore backend frontend nginx || true' ERR
-          docker compose up -d postgres manticore
+          dc() { docker compose -f docker-compose.yml -f .github/docker-compose.test.yml "$@"; }
+          trap 'dc ps || true; dc logs --tail=200 postgres manticore backend frontend nginx || true' ERR
+
+          dc up -d postgres manticore
 
           for i in $(seq 1 30); do
-            pg_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(docker compose ps -q postgres)" 2>/dev/null || true)
-            mc_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(docker compose ps -q manticore)" 2>/dev/null || true)
+            pg_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(dc ps -q postgres)" 2>/dev/null || true)
+            mc_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(dc ps -q manticore)" 2>/dev/null || true)
             if [ "$pg_status" = healthy ] && [ "$mc_status" = healthy ]; then
               break
             fi
             if [ "$pg_status" = unhealthy ] || [ "$mc_status" = unhealthy ]; then
               echo "postgres=$pg_status manticore=$mc_status"
-              docker inspect -f '{{json .State.Health}}' "$(docker compose ps -q manticore)" || true
-              docker compose exec -T manticore sh -lc 'command -v mysql || true; command -v searchd || true; mysql -h127.0.0.1 -P9306 -e "SHOW STATUS" || true' || true
+              docker inspect -f '{{json .State.Health}}' "$(dc ps -q manticore)" || true
+              dc exec -T manticore sh -lc 'command -v mysql || true; mysql -h127.0.0.1 -P9306 -e "SHOW STATUS" || true' || true
               exit 1
             fi
             sleep 2
           done
 
-          test "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q postgres)")" = healthy
-          test "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q manticore)")" = healthy
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$(dc ps -q postgres)")" = healthy
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$(dc ps -q manticore)")" = healthy
 
-          docker compose run --rm backend migrate
-          docker compose up -d backend frontend nginx
+          dc run --rm backend migrate
+
+          go test -count=1 -tags=integration ./internal/crawler/queue
+          go test -count=1 -tags=integration ./internal/indexer/outbox
+
+          dc up -d backend frontend nginx
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1/health/live >/dev/null && curl -fsS http://127.0.0.1/health/ready >/dev/null; then
               curl -fsS http://127.0.0.1/health/ready
@@ -92,4 +103,4 @@ jobs:
 
       - name: Cleanup runtime
         if: always()
-        run: docker compose down -v --remove-orphans || true
+        run: docker compose -f docker-compose.yml -f .github/docker-compose.test.yml down -v --remove-orphans || true
