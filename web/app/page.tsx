@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 
 type SearchResult = {
   id: number;
@@ -52,12 +52,14 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [answerLoading, setAnswerLoading] = useState(false);
   const [error, setError] = useState("");
+  const requestEpoch = useRef(0);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const q = query.trim();
     if (!q || loading) return;
 
+    const epoch = ++requestEpoch.current;
     setLoading(true);
     setAnswerLoading(false);
     setAnswer(null);
@@ -72,22 +74,25 @@ export default function HomePage() {
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok) throw new Error(payload?.error || "search_failed");
+        if (epoch !== requestEpoch.current) return;
         const searchPayload = payload as SearchResponse;
         setData(searchPayload);
-        if (searchPayload.results.length > 0) void loadAnswer(q);
+        if (searchPayload.results.length > 0) void loadAnswer(q, epoch);
       } finally {
         window.clearTimeout(timer);
       }
     } catch (err) {
+      if (epoch !== requestEpoch.current) return;
       setData(null);
       setAnswer(null);
       setError(err instanceof DOMException && err.name === "AbortError" ? "Поиск занял слишком много времени. Попробуйте ещё раз." : "Не удалось выполнить поиск. Попробуйте ещё раз.");
     } finally {
-      setLoading(false);
+      if (epoch === requestEpoch.current) setLoading(false);
     }
   }
 
-  async function loadAnswer(q: string) {
+  async function loadAnswer(q: string, epoch: number) {
+    if (epoch !== requestEpoch.current) return;
     setAnswerLoading(true);
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 4500);
@@ -96,14 +101,14 @@ export default function HomePage() {
         signal: controller.signal,
         headers: { Accept: "application/json" },
       });
-      if (!response.ok) return;
+      if (!response.ok || epoch !== requestEpoch.current) return;
       const payload = (await response.json()) as AnswerResponse;
-      setAnswer(payload.available ? payload : null);
+      if (epoch === requestEpoch.current) setAnswer(payload.available ? payload : null);
     } catch {
-      setAnswer(null);
+      if (epoch === requestEpoch.current) setAnswer(null);
     } finally {
       window.clearTimeout(timer);
-      setAnswerLoading(false);
+      if (epoch === requestEpoch.current) setAnswerLoading(false);
     }
   }
 
