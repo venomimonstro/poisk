@@ -1,9 +1,12 @@
 package manticore
 
-const WebIndex = "web_documents"
+const (
+	WebIndex         = "web_documents"
+	WebSchemaVersion = 1
+)
 
-// WebSchemaSQL is intentionally explicit. Schema changes require a new sprint/ADR
-// and a rebuild instead of silent runtime mutation.
+// WebSchemaSQL is intentionally explicit. Schema changes require a version bump
+// and an explicit rebuild instead of silent runtime mutation.
 const WebSchemaSQL = `CREATE TABLE IF NOT EXISTS web_documents (
     title text indexed stored,
     description text indexed stored,
