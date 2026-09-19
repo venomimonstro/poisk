@@ -13,6 +13,13 @@ func TestRobotsFromHeadersScopesPoiskBot(t *testing.T) {
 	if !got.NoIndex || !got.NoFollow { t.Fatalf("robots=%+v", got) }
 }
 
+func TestRobotsFromHeadersKeepsForeignAgentScope(t *testing.T) {
+	h := make(http.Header)
+	h.Add("X-Robots-Tag", "googlebot: noindex, nofollow")
+	got := RobotsFromHeaders(h)
+	if got.NoIndex || got.NoFollow { t.Fatalf("foreign directives leaked into PoiskBot policy: %+v", got) }
+}
+
 func TestRobotsFromHeadersGenericAndMerge(t *testing.T) {
 	h := make(http.Header)
 	h.Add("X-Robots-Tag", "noindex")
