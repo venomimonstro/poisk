@@ -14,6 +14,7 @@ import (
 const WebDocumentEntity = "WEB_DOCUMENT"
 
 type Source interface {
+	IsCurrent(ctx context.Context, urlID, version int64) (bool, error)
 	LoadVersion(ctx context.Context, urlID, version int64) (source.Document, error)
 }
 
@@ -36,6 +37,9 @@ type Processor struct {
 }
 
 func (p Processor) Process(ctx context.Context, event outbox.Event) error {
+	if p.Source == nil || p.Index == nil || p.Ack == nil {
+		return errors.New("index processor dependencies are not initialized")
+	}
 	if event.EntityType != WebDocumentEntity {
 		return p.fail(ctx, event, fmt.Errorf("unsupported entity type %q", event.EntityType))
 	}
@@ -58,9 +62,17 @@ func (p Processor) Process(ctx context.Context, event outbox.Event) error {
 }
 
 func (p Processor) applyUpsert(ctx context.Context, event outbox.Event) error {
+	current, err := p.Source.IsCurrent(ctx, event.EntityID, event.EntityVersion)
+	if err != nil { return err }
+	if !current {
+		// The URL advanced after this event was created. A stale event must not
+		// mutate the search index and can be acknowledged safely.
+		return nil
+	}
+
 	doc, err := p.Source.LoadVersion(ctx, event.EntityID, event.EntityVersion)
 	if errors.Is(err, source.ErrNotIndexable) {
-		// A newer extraction can turn an already indexed page into noindex/thin.
+		// A current extraction can turn an already indexed page into noindex/thin.
 		// DELETE is idempotent and prevents serving stale content.
 		return p.Index.Delete(ctx, event.EntityID)
 	}
