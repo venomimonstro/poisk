@@ -5,6 +5,8 @@ go 1.27
 require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/temoto/robotstxt v1.1.2
+	golang.org/x/net v0.59.0
 )
 
 require (
