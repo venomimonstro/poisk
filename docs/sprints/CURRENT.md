@@ -1,43 +1,47 @@
 # CURRENT SPRINT
 
-**Sprint:** 01 — Runtime Foundation
+**Sprint:** 02 — Canonical Data + Queue
 **Status:** IN_PROGRESS
 
 ## Goal
-Собрать минимальный production-minded runtime, который поднимается одной командой и проверяет зависимости через readiness.
+Создать каноническую модель данных и безопасные primitives для фоновой обработки: lease queue, idempotency и transactional outbox до появления crawler business logic.
 
 ## Depends On
-Sprint 00 — PASS.
+- Sprint 00 — PASS
+- Sprint 01 — PASS (GitHub Actions run `35456240270`)
 
 ## Allowed Work
-- Docker Compose
-- Nginx
-- Go application skeleton
-- Next.js skeleton
-- PostgreSQL/PostGIS
-- Manticore
-- migrations framework
-- typed config
-- structured logging
-- `/health/live`
-- `/health/ready`
+- PostgreSQL schema
+- domains / urls
+- document_versions
+- crawl_queue / crawl_history
+- index_outbox
+- audit_log
+- system_settings
+- queue/outbox repositories
+- lease/idempotency/version primitives
+- sqlc contract
+- unit/integration tests для concurrency/data integrity
 
 ## Forbidden Work
-- crawler business logic
-- ranking
+- HTTP crawling/fetching
+- robots/sitemap processing
+- ranking/search API
 - GEO business logic
 - Answer Engine
-- Redis/Kafka/Kubernetes/другие неутверждённые компоненты
+- Redis/Kafka/RabbitMQ
 
 ## Definition of Done
-- [ ] `docker compose up --build -d` запускает стек
-- [ ] backend компилируется
-- [ ] frontend компилируется
-- [ ] PostgreSQL healthcheck работает
-- [ ] Manticore healthcheck работает
-- [ ] `/health/live` возвращает 200
-- [ ] `/health/ready` проверяет критические зависимости
-- [ ] config валидируется при старте
-- [ ] structured logs работают
-- [ ] unit tests PASS
-- [ ] Sprint 01 report создан
+- [ ] canonical tables созданы migrations
+- [ ] constraints/indexes защищают invariants
+- [ ] duplicate active crawl job не создаётся
+- [ ] lease task выдаётся только одному worker
+- [ ] expired lease возвращается в обработку
+- [ ] retry/dead transition определены
+- [ ] index_outbox имеет unique event invariant
+- [ ] outbox lease безопасен для нескольких workers
+- [ ] old entity version не может перезаписать new version на уровне application contract
+- [ ] active queue отделена от crawl history
+- [ ] migrations проходят на empty и Sprint 01 DB
+- [ ] integration tests PASS
+- [ ] Sprint 02 report создан
