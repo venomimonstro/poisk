@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -68,10 +69,26 @@ func (s *Service) Search(ctx context.Context, req Request) (Response, error) {
 		if len(res.Hits) > 0 { break }
 	}
 
+	reranked := rerank(found.Hits)
 	resp := Response{Query: req.Query, Normalized: norm.Primary, UsedQuery: used, Total: found.Total, TookMS: found.TookMS}
-	resp.Results = diversify(found.Hits, limit, 2)
+	resp.Results = diversify(reranked, limit, 2)
 	if s.Cache != nil { s.Cache.Put(cacheKey, resp, 30*time.Second) }
 	return resp, nil
+}
+
+// rerank applies bounded quality/spam guardrails to the lexical score. The
+// lexical score remains dominant: quality can add at most 20%, while severe
+// spam can demote a result down to 20% of its lexical score.
+func rerank(hits []backend.Hit) []backend.Hit {
+	out := append([]backend.Hit(nil), hits...)
+	for i := range out {
+		factor := 1 + 0.002*out[i].QualityScore - 0.008*out[i].SpamScore
+		if factor < 0.20 { factor = 0.20 }
+		if factor > 1.20 { factor = 1.20 }
+		out[i].Score *= factor
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	return out
 }
 
 func diversify(hits []backend.Hit, limit, perHost int) []Result {
