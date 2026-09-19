@@ -9,14 +9,15 @@ import (
 )
 
 type Config struct {
-	Env              string
-	Addr             string
-	ShutdownTimeout  time.Duration
-	LogLevel         string
-	PostgresDSN      string
-	ManticoreHost    string
-	ManticoreSQLPort int
-	MigrationsDir    string
+	Env               string
+	Addr              string
+	ShutdownTimeout   time.Duration
+	LogLevel          string
+	PostgresDSN       string
+	ManticoreHost     string
+	ManticoreSQLPort  int
+	ManticoreHTTPPort int
+	MigrationsDir     string
 }
 
 func Load() (Config, error) {
@@ -39,6 +40,12 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("invalid MANTICORE_SQL_PORT")
 	}
 	cfg.ManticoreSQLPort = port
+
+	httpPort, err := strconv.Atoi(getenv("MANTICORE_HTTP_PORT", "9308"))
+	if err != nil || httpPort <= 0 || httpPort > 65535 {
+		return Config{}, fmt.Errorf("invalid MANTICORE_HTTP_PORT")
+	}
+	cfg.ManticoreHTTPPort = httpPort
 
 	db := getenv("POSTGRES_DB", "poisk")
 	user := getenv("POSTGRES_USER", "poisk")
