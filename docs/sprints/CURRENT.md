@@ -1,10 +1,10 @@
 # CURRENT SPRINT
 
-**Sprint:** 07 — Search Alpha
+**Sprint:** 08 — Search Quality 1.0
 **Status:** IN_PROGRESS
 
 ## Goal
-Собрать первый end-to-end WEB Search поверх Manticore: query normalization, русская раскладка/транслитерация/опечатки, bounded search transport, BM25F-oriented field query, snippets, Search API и базовый SERP без Answer Engine/GEO.
+Сделать качество поиска измеримым и регрессионно контролируемым: golden queries, NDCG/MRR/Recall/ZeroResult, duplicate/spam signals, deterministic rerank baseline и domain diversity без Answer Engine/GEO.
 
 ## Depends On
 - Sprint 00 — PASS
@@ -12,41 +12,39 @@
 - Sprint 02 — PASS
 - Sprint 03 — PASS
 - Sprint 04 — PASS
-- Sprint 05 — PASS (code/static gate; no CI added)
-- Sprint 06 — PASS (code/static gate; no CI added)
+- Sprint 05 — PASS
+- Sprint 06 — PASS
+- Sprint 07 — PASS
 
 ## Allowed Work
-- query normalization
-- keyboard layout correction
-- transliteration variants
-- bounded typo/spelling candidates
-- Manticore WEB search request/response
-- BM25F field weighting baseline
-- snippets/highlights
-- Search API request validation
-- basic SERP frontend integration
-- bounded in-process cache
-- unit/transport tests
+- golden query dataset/schema/loader
+- relevance judgments
+- NDCG@10 / MRR / Recall@K / ZeroResult metrics
+- Duplicate@10 / domain diversity metrics
+- lightweight deterministic reranking
+- quality/spam score integration into ranking
+- evaluation runner and reports
+- regression thresholds
+- bounded tests/benchmarks
 
 ## Forbidden Work
 - Answer Engine
 - LLM on every search query
 - GEO/organizations/maps
-- ranking-learning pipeline
-- vector database/embeddings
+- learned ranking model
+- vector DB/embeddings
 - Redis/Kafka/microservices
 
 ## Definition of Done
-- [ ] query normalization deterministic
-- [ ] RU/EN keyboard-layout correction bounded and tested
-- [ ] transliteration variants bounded and tested
-- [ ] empty/oversized/abusive query rejected
-- [ ] Manticore search request has hard timeout and result limit
-- [ ] title/body/description field weights are explicit
-- [ ] snippets returned without raw HTML execution
-- [ ] domain diversity baseline applied
-- [ ] Search API response has stable typed contract
-- [ ] repeated query can use bounded local cache
-- [ ] transport and query tests added
+- [ ] golden query schema and loader implemented
+- [ ] initial golden query seed committed and extensible to 500+
+- [ ] NDCG@10 deterministic and tested
+- [ ] MRR deterministic and tested
+- [ ] Recall@K deterministic and tested
+- [ ] ZeroResult and Duplicate@10 measured
+- [ ] deterministic rerank incorporates relevance baseline + quality/spam guardrails
+- [ ] regression gate supports explicit thresholds
+- [ ] evaluation output is machine-readable
+- [ ] tests cover metric edge cases
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 07 report created
+- [ ] Sprint 08 report created
