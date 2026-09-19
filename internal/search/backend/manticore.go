@@ -30,28 +30,30 @@ func DefaultConfig() Config {
 }
 
 type Client struct {
-	baseURL string
-	timeout time.Duration
-	maxBody int64
+	baseURL    string
+	timeout    time.Duration
+	maxBody    int64
 	maxResults int
-	http *http.Client
+	http       *http.Client
 }
 
 type Hit struct {
-	ID          int64
-	Score       float64
-	Title       string
-	Description string
-	URL         string
-	Host        string
-	Lang        string
-	Snippet     string
+	ID           int64
+	Score        float64
+	Title        string
+	Description  string
+	URL          string
+	Host         string
+	Lang         string
+	Snippet      string
+	QualityScore float64
+	SpamScore    float64
 }
 
 type Result struct {
-	Total int64
+	Total  int64
 	TookMS int64
-	Hits []Hit
+	Hits   []Hit
 }
 
 func New(cfg Config) (*Client, error) {
@@ -75,9 +77,9 @@ func (c *Client) Search(ctx context.Context, q string, limit int) (Result, error
 		"table": "web_documents",
 		"query": map[string]any{"match": map[string]any{"title,description,body": q}},
 		"limit": limit,
-		"_source": []string{"title","description","url","host","lang"},
+		"_source": []string{"title", "description", "url", "host", "lang", "quality_score", "spam_score"},
 		"highlight": map[string]any{
-			"fields": []string{"title","description","body"},
+			"fields": []string{"title", "description", "body"},
 			"before_match": "[[",
 			"after_match": "]]",
 			"limit": 280,
@@ -103,19 +105,21 @@ func (c *Client) Search(ctx context.Context, q string, limit int) (Result, error
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 { return Result{}, fmt.Errorf("%w: status=%d", ErrSearchBackend, resp.StatusCode) }
 
 	var decoded struct {
-		Took int64 `json:"took"`
-		TimedOut bool `json:"timed_out"`
+		Took     int64 `json:"took"`
+		TimedOut bool  `json:"timed_out"`
 		Hits struct {
 			Total int64 `json:"total"`
 			Hits []struct {
-				ID int64 `json:"_id"`
-				Score float64 `json:"_score"`
+				ID     int64   `json:"_id"`
+				Score  float64 `json:"_score"`
 				Source struct {
-					Title string `json:"title"`
-					Description string `json:"description"`
-					URL string `json:"url"`
-					Host string `json:"host"`
-					Lang string `json:"lang"`
+					Title        string  `json:"title"`
+					Description  string  `json:"description"`
+					URL          string  `json:"url"`
+					Host         string  `json:"host"`
+					Lang         string  `json:"lang"`
+					QualityScore float64 `json:"quality_score"`
+					SpamScore    float64 `json:"spam_score"`
 				} `json:"_source"`
 				Highlight map[string][]string `json:"highlight"`
 			} `json:"hits"`
@@ -126,14 +130,24 @@ func (c *Client) Search(ctx context.Context, q string, limit int) (Result, error
 	out := Result{Total: decoded.Hits.Total, TookMS: decoded.Took, Hits: make([]Hit, 0, len(decoded.Hits.Hits))}
 	for _, h := range decoded.Hits.Hits {
 		snippet := firstSnippet(h.Highlight, h.Source.Description)
-		out.Hits = append(out.Hits, Hit{ID:h.ID, Score:h.Score, Title:h.Source.Title, Description:h.Source.Description, URL:h.Source.URL, Host:h.Source.Host, Lang:h.Source.Lang, Snippet:snippet})
+		out.Hits = append(out.Hits, Hit{
+			ID: h.ID, Score: h.Score, Title: h.Source.Title, Description: h.Source.Description,
+			URL: h.Source.URL, Host: h.Source.Host, Lang: h.Source.Lang, Snippet: snippet,
+			QualityScore: clampScore(h.Source.QualityScore), SpamScore: clampScore(h.Source.SpamScore),
+		})
 	}
 	return out, nil
 }
 
 func firstSnippet(highlight map[string][]string, fallback string) string {
-	for _, field := range []string{"description","body","title"} {
+	for _, field := range []string{"description", "body", "title"} {
 		if values := highlight[field]; len(values) > 0 && strings.TrimSpace(values[0]) != "" { return values[0] }
 	}
 	return fallback
+}
+
+func clampScore(v float64) float64 {
+	if v < 0 { return 0 }
+	if v > 100 { return 100 }
+	return v
 }
