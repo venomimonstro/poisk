@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/venomimonstro/poisk/internal/platform/config"
 	"github.com/venomimonstro/poisk/internal/platform/health"
+	"github.com/venomimonstro/poisk/internal/platform/migrate"
 )
 
 func main() {
@@ -39,17 +41,28 @@ func run() error {
 		mode = os.Args[1]
 	}
 
-	if mode != "api" {
-		return errors.New("runtime mode is not implemented in Sprint 01")
-	}
-
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.PostgresDSN)
 	if err != nil {
-		return err
+		return fmt.Errorf("create postgres pool: %w", err)
 	}
 	defer pool.Close()
 
+	switch mode {
+	case "migrate":
+		if err := migrate.Up(ctx, pool, cfg.MigrationsDir); err != nil {
+			return err
+		}
+		slog.Info("migrations applied")
+		return nil
+	case "api":
+		return runAPI(cfg, pool)
+	default:
+		return fmt.Errorf("runtime mode %q is not implemented in current sprint", mode)
+	}
+}
+
+func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	checker := health.Checker{
 		DB:               pool,
 		ManticoreHost:    cfg.ManticoreHost,
@@ -74,7 +87,7 @@ func run() error {
 
 	serverErr := make(chan error, 1)
 	go func() {
-		slog.Info("http server started", "addr", cfg.Addr, "env", cfg.Env, "mode", mode)
+		slog.Info("http server started", "addr", cfg.Addr, "env", cfg.Env, "mode", "api")
 		serverErr <- server.ListenAndServe()
 	}()
 
