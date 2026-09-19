@@ -19,8 +19,6 @@ services:
   manticore:
     image: manticoresearch/manticore:29.9.0
     restart: unless-stopped
-    environment:
-      EXTRA: "1"
     volumes:
       - manticore_data:/var/lib/manticore
     ulimits:
@@ -32,7 +30,7 @@ services:
         soft: -1
         hard: -1
     healthcheck:
-      test: ["CMD-SHELL", "searchd --status >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "mysql -h127.0.0.1 -P9306 -e 'SHOW STATUS' >/dev/null 2>&1 || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 20
