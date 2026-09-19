@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 	"github.com/venomimonstro/poisk/internal/platform/config"
 	"github.com/venomimonstro/poisk/internal/platform/health"
 	"github.com/venomimonstro/poisk/internal/platform/migrate"
+	"github.com/venomimonstro/poisk/internal/quality"
 	searchsvc "github.com/venomimonstro/poisk/internal/search"
 	searchbackend "github.com/venomimonstro/poisk/internal/search/backend"
 	searchhttp "github.com/venomimonstro/poisk/internal/search/httpapi"
@@ -58,6 +60,8 @@ func run() error {
 		return runAPI(cfg, pool)
 	case "indexer":
 		return runIndexer(cfg, pool)
+	case "quality":
+		return runQuality(cfg)
 	default:
 		return fmt.Errorf("runtime mode %q is not implemented in current sprint", mode)
 	}
@@ -136,4 +140,43 @@ func runIndexer(cfg config.Config, pool *pgxpool.Pool) error {
 	}
 	slog.Info("indexer worker started", "worker_id", runner.WorkerID)
 	return runner.Run(ctx)
+}
+
+func runQuality(cfg config.Config) error {
+	goldenPath := os.Getenv("QUALITY_GOLDEN_PATH")
+	if goldenPath == "" { goldenPath = "/app/docs/quality/golden.seed.json" }
+	thresholdPath := os.Getenv("QUALITY_THRESHOLDS_PATH")
+	if thresholdPath == "" { thresholdPath = "/app/docs/quality/thresholds.json" }
+
+	goldenFile, err := os.Open(goldenPath)
+	if err != nil { return fmt.Errorf("open golden set: %w", err) }
+	defer goldenFile.Close()
+	golden, err := quality.LoadGolden(goldenFile)
+	if err != nil { return err }
+
+	thresholdFile, err := os.Open(thresholdPath)
+	if err != nil { return fmt.Errorf("open quality thresholds: %w", err) }
+	defer thresholdFile.Close()
+	thresholds, err := quality.LoadThresholds(thresholdFile)
+	if err != nil { return err }
+
+	backend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
+	if err != nil { return fmt.Errorf("create quality search backend: %w", err) }
+	service := &searchsvc.Service{Backend: backend}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	report, err := quality.EvaluateGolden(ctx, service, golden)
+	if err != nil { return err }
+	gate := quality.CheckGate(report.Summary, thresholds)
+	output := struct {
+		Report     quality.Report     `json:"report"`
+		Thresholds quality.Thresholds `json:"thresholds"`
+		Gate       quality.GateResult `json:"gate"`
+	}{Report: report, Thresholds: thresholds, Gate: gate}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(output); err != nil { return fmt.Errorf("encode quality report: %w", err) }
+	if !gate.Pass { return errors.New("search quality gate failed") }
+	return nil
 }
