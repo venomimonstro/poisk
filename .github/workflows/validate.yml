@@ -39,6 +39,8 @@ jobs:
 
       - name: Frontend build
         working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
         run: |
           npm install --ignore-scripts
           npm run lint
@@ -56,7 +58,27 @@ jobs:
       - name: Runtime smoke test
         run: |
           set -euo pipefail
+          trap 'docker compose ps || true; docker compose logs --tail=200 postgres manticore backend frontend nginx || true' ERR
           docker compose up -d postgres manticore
+
+          for i in $(seq 1 30); do
+            pg_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(docker compose ps -q postgres)" 2>/dev/null || true)
+            mc_status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$(docker compose ps -q manticore)" 2>/dev/null || true)
+            if [ "$pg_status" = healthy ] && [ "$mc_status" = healthy ]; then
+              break
+            fi
+            if [ "$pg_status" = unhealthy ] || [ "$mc_status" = unhealthy ]; then
+              echo "postgres=$pg_status manticore=$mc_status"
+              docker inspect -f '{{json .State.Health}}' "$(docker compose ps -q manticore)" || true
+              docker compose exec -T manticore sh -lc 'command -v mysql || true; command -v searchd || true; mysql -h127.0.0.1 -P9306 -e "SHOW STATUS" || true' || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q postgres)")" = healthy
+          test "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q manticore)")" = healthy
+
           docker compose run --rm backend migrate
           docker compose up -d backend frontend nginx
           for i in $(seq 1 30); do
@@ -66,8 +88,6 @@ jobs:
             fi
             sleep 2
           done
-          docker compose ps
-          docker compose logs --tail=200 backend postgres manticore nginx frontend
           exit 1
 
       - name: Cleanup runtime
