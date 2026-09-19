@@ -15,7 +15,7 @@ import (
 )
 
 type fakeValidator struct {
-	seen []string
+	seen       []string
 	rejectHost string
 }
 
@@ -31,6 +31,11 @@ func (v *fakeValidator) Validate(_ context.Context, raw string) (crawlersecurity
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 func (fn roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return fn(r) }
+
+type timeoutError struct{}
+func (timeoutError) Error() string { return "timeout" }
+func (timeoutError) Timeout() bool { return true }
+func (timeoutError) Temporary() bool { return true }
 
 func response(status int, headers http.Header, body string) *http.Response {
 	if headers == nil { headers = make(http.Header) }
@@ -55,6 +60,26 @@ func TestConditionalHeadersAndNotModified(t *testing.T) {
 	got, err := f.Fetch(context.Background(), "https://example.com/a", Conditional{ETag: `"abc"`, LastModified: "Wed, 21 Oct 2015 07:28:00 GMT"})
 	if err != nil { t.Fatal(err) }
 	if !got.NotModified || len(got.Body) != 0 { t.Fatalf("unexpected result: %+v", got) }
+}
+
+func TestConditionalHeadersNotForwardedAfterRedirect(t *testing.T) {
+	v := &fakeValidator{}
+	calls := 0
+	f := testFetcher(v, func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			if r.Header.Get("If-None-Match") == "" { t.Fatal("initial conditional header missing") }
+			h := make(http.Header)
+			h.Set("Location", "https://other.example/final")
+			return response(http.StatusFound, h, ""), nil
+		}
+		if got := r.Header.Get("If-None-Match"); got != "" { t.Fatalf("redirect leaked If-None-Match=%q", got) }
+		if got := r.Header.Get("If-Modified-Since"); got != "" { t.Fatalf("redirect leaked If-Modified-Since=%q", got) }
+		return response(http.StatusOK, nil, "ok"), nil
+	})
+	got, err := f.Fetch(context.Background(), "https://example.com/start", Conditional{ETag: `"abc"`, LastModified: "Wed, 21 Oct 2015 07:28:00 GMT"})
+	if err != nil { t.Fatal(err) }
+	if got.FinalURL != "https://other.example/final" || calls != 2 { t.Fatalf("result=%+v calls=%d", got, calls) }
 }
 
 func TestRedirectTargetIsValidatedBeforeSecondRequest(t *testing.T) {
@@ -88,6 +113,22 @@ func TestBodyHardLimit(t *testing.T) {
 	if !errors.Is(err, ErrBodyTooLarge) { t.Fatalf("error=%v", err) }
 }
 
+func TestContentLengthRejectedEarly(t *testing.T) {
+	v := &fakeValidator{}
+	cfg := DefaultConfig()
+	cfg.MaxBodyBytes = 4
+	f := New(cfg, v)
+	f.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		resp := response(http.StatusOK, nil, "")
+		resp.ContentLength = 100
+		return resp, nil
+	})
+	f.client.Timeout = 0
+	f.sleep = func(context.Context, time.Duration) error { return nil }
+	_, err := f.Fetch(context.Background(), "https://example.com/large", Conditional{})
+	if !errors.Is(err, ErrBodyTooLarge) { t.Fatalf("error=%v", err) }
+}
+
 func TestRetriesTransientStatus(t *testing.T) {
 	v := &fakeValidator{}
 	cfg := DefaultConfig()
@@ -104,6 +145,35 @@ func TestRetriesTransientStatus(t *testing.T) {
 	got, err := f.Fetch(context.Background(), "https://example.com/retry", Conditional{})
 	if err != nil { t.Fatal(err) }
 	if got.StatusCode != http.StatusOK || got.Attempts != 3 || calls != 3 { t.Fatalf("result=%+v calls=%d", got, calls) }
+}
+
+func TestRetriesTransientNetworkError(t *testing.T) {
+	v := &fakeValidator{}
+	cfg := DefaultConfig()
+	cfg.MaxRetries = 1
+	calls := 0
+	f := New(cfg, v)
+	f.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 { return nil, timeoutError{} }
+		return response(http.StatusOK, nil, "ok"), nil
+	})
+	f.client.Timeout = 0
+	f.sleep = func(context.Context, time.Duration) error { return nil }
+	got, err := f.Fetch(context.Background(), "https://example.com/retry", Conditional{})
+	if err != nil { t.Fatal(err) }
+	if got.Attempts != 2 || calls != 2 { t.Fatalf("result=%+v calls=%d", got, calls) }
+}
+
+func TestContextCancellationStopsRetryWait(t *testing.T) {
+	v := &fakeValidator{}
+	ctx, cancel := context.WithCancel(context.Background())
+	f := testFetcher(v, func(r *http.Request) (*http.Response, error) {
+		cancel()
+		return nil, timeoutError{}
+	})
+	_, err := f.Fetch(ctx, "https://example.com/cancel", Conditional{})
+	if !errors.Is(err, context.Canceled) { t.Fatalf("error=%v", err) }
 }
 
 func TestRetryAfterIsCapped(t *testing.T) {
