@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/venomimonstro/poisk/internal/search/backend"
@@ -46,4 +47,30 @@ func TestCacheAvoidsSecondBackendCall(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if !resp.Cached { t.Fatal("expected cached response") }
 	if len(b.calls) != firstCalls { t.Fatalf("backend calls before=%d after=%d", firstCalls, len(b.calls)) }
+}
+
+func TestRerankUsesBoundedQualityAndSpamFactors(t *testing.T) {
+	hits := []backend.Hit{
+		{ID: 1, Score: 10, QualityScore: 0, SpamScore: 0},
+		{ID: 2, Score: 9, QualityScore: 100, SpamScore: 0},
+		{ID: 3, Score: 20, QualityScore: 0, SpamScore: 100},
+	}
+	got := rerank(hits)
+	if got[0].ID != 2 || got[1].ID != 1 || got[2].ID != 3 {
+		t.Fatalf("unexpected order: %+v", got)
+	}
+	if math.Abs(got[0].Score-10.8) > 1e-9 {
+		t.Fatalf("quality adjusted score=%f", got[0].Score)
+	}
+	if math.Abs(got[2].Score-4.0) > 1e-9 {
+		t.Fatalf("spam adjusted score=%f", got[2].Score)
+	}
+}
+
+func TestRerankDoesNotMutateBackendHits(t *testing.T) {
+	original := []backend.Hit{{ID: 1, Score: 10, QualityScore: 100}}
+	_ = rerank(original)
+	if original[0].Score != 10 {
+		t.Fatalf("input mutated: %+v", original)
+	}
 }
