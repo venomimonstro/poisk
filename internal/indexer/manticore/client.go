@@ -53,8 +53,17 @@ func New(cfg Config) (*Client, error) {
 }
 
 func (c *Client) EnsureSchema(ctx context.Context) error {
-	_, err := c.execSQL(ctx, WebSchemaSQL)
-	return err
+	if _, err := c.execSQL(ctx, WebSchemaSQL); err != nil { return err }
+	body, err := c.execSQL(ctx, "DESC "+WebIndex)
+	if err != nil { return fmt.Errorf("describe web index: %w", err) }
+	hasAuthority, err := rawHasColumn(body, "authority_score")
+	if err != nil { return err }
+	if !hasAuthority {
+		if _, err := c.execSQL(ctx, "ALTER TABLE "+WebIndex+" ADD COLUMN authority_score FLOAT"); err != nil {
+			return fmt.Errorf("add authority_score attribute: %w", err)
+		}
+	}
+	return nil
 }
 
 func (c *Client) Apply(ctx context.Context, doc Document) (bool, error) {
@@ -65,11 +74,12 @@ func (c *Client) Apply(ctx context.Context, doc Document) (bool, error) {
 	if err != nil { return false, err }
 	if exists && current > doc.EntityVersion { return false, nil }
 
-	q := "REPLACE INTO " + WebIndex + " (id,title,description,body,url,host,lang,content_hash,entity_version,quality_score,spam_score,fetched_at) VALUES (" +
+	q := "REPLACE INTO " + WebIndex + " (id,title,description,body,url,host,lang,content_hash,entity_version,quality_score,spam_score,authority_score,fetched_at) VALUES (" +
 		strconv.FormatInt(doc.ID, 10) + "," + quote(doc.Title) + "," + quote(doc.Description) + "," + quote(doc.Body) + "," +
 		quote(doc.URL) + "," + quote(doc.Host) + "," + quote(doc.Lang) + "," + quote(doc.ContentHash) + "," +
-		strconv.FormatInt(doc.EntityVersion, 10) + "," + strconv.FormatFloat(doc.QualityScore, 'f', -1, 64) + "," +
-		strconv.FormatFloat(doc.SpamScore, 'f', -1, 64) + "," + strconv.FormatInt(doc.FetchedAtUnix, 10) + ")"
+		strconv.FormatInt(doc.EntityVersion, 10) + "," + strconv.FormatFloat(clamp100(doc.QualityScore), 'f', -1, 64) + "," +
+		strconv.FormatFloat(clamp100(doc.SpamScore), 'f', -1, 64) + "," + strconv.FormatFloat(clamp100(doc.AuthorityScore), 'f', -1, 64) + "," +
+		strconv.FormatInt(doc.FetchedAtUnix, 10) + ")"
 	_, err = c.execSQL(ctx, q)
 	return err == nil, err
 }
@@ -101,6 +111,21 @@ func (c *Client) CurrentVersion(ctx context.Context, id int64) (int64, bool, err
 	version, err = strconv.ParseInt(text, 10, 64)
 	if err != nil { return 0, false, fmt.Errorf("parse entity_version: %w", err) }
 	return version, true, nil
+}
+
+func rawHasColumn(body []byte, wanted string) (bool, error) {
+	var sets []rawResultSet
+	if err := json.Unmarshal(body, &sets); err != nil { return false, fmt.Errorf("decode manticore schema: %w", err) }
+	if len(sets) == 0 { return false, errors.New("manticore schema response is empty") }
+	for _, row := range sets[0].Data {
+		for key, raw := range row {
+			if !strings.EqualFold(key, "field") { continue }
+			var field string
+			if err := json.Unmarshal(raw, &field); err != nil { return false, fmt.Errorf("decode schema field: %w", err) }
+			if strings.EqualFold(field, wanted) { return true, nil }
+		}
+	}
+	return false, nil
 }
 
 func (c *Client) execSQL(ctx context.Context, query string) ([]byte, error) {
@@ -138,6 +163,12 @@ func validateRawResponse(body []byte) error {
 func quote(s string) string {
 	r := strings.NewReplacer("\\", "\\\\", "'", "\\'", "\x00", "", "\n", "\\n", "\r", "\\r", "\t", "\\t")
 	return "'" + r.Replace(s) + "'"
+}
+
+func clamp100(v float64) float64 {
+	if v < 0 { return 0 }
+	if v > 100 { return 100 }
+	return v
 }
 
 func truncate(s string, n int) string {
