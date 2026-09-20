@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type Plan struct {
@@ -95,7 +97,7 @@ VALUES($1,$2,$3,$4,NULLIF($5,''),$6,NULLIF($7,''),$8)
 ON CONFLICT(batch_id,staging_id) DO UPDATE SET plan_hash=organization_import_plans.plan_hash
 WHERE organization_import_plans.plan_hash=EXCLUDED.plan_hash
 RETURNING plan_id`,plan.BatchID,plan.StagingID,plan.Action,plan.TargetPlaceID,plan.MatchRule,plan.Confidence,plan.ReasonCode,plan.PlanHash).Scan(&planID)
-	if errors.Is(err,pgxErrNoRows()){return ErrImportConflict}
+	if errors.Is(err,pgx.ErrNoRows){return ErrImportConflict}
 	if err!=nil{return fmt.Errorf("save organization import plan: %w",err)}
 	if plan.Action=="REVIEW"{
 		for _,candidate:=range review{
@@ -109,6 +111,3 @@ VALUES($1,$2,$3,$4,$5) ON CONFLICT(staging_id,candidate_place_id) DO NOTHING`,ro
 	if err!=nil{return err};if tag.RowsAffected()!=1{return ErrImportConflict}
 	return tx.Commit(ctx)
 }
-
-// pgxErrNoRows is kept behind a helper so planner.go stays focused on planning semantics.
-func pgxErrNoRows() error { return fmt.Errorf("%w", ErrImportNotFound) }
