@@ -27,16 +27,23 @@ grep -qx 'backup_format=poisk-v1' "$RESTORE_DIR/MANIFEST" || { echo "restore ref
 export PGPASSWORD="$POSTGRES_PASSWORD"
 pg_restore --list "$RESTORE_DIR/postgres.dump" >/dev/null
 
-# Refuse to overwrite a non-empty target accidentally. Set RESTORE_ALLOW_NONEMPTY=yes
-# only during an intentional disaster-recovery operation.
-count="$(psql --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" 2>/dev/null || printf '0')"
-if [ "$count" != "0" ] && [ "${RESTORE_ALLOW_NONEMPTY:-no}" != "yes" ]; then
-  echo "restore refused: target database is not empty; set RESTORE_ALLOW_NONEMPTY=yes after verification" >&2
-  exit 3
+count="$(psql --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")"
+restore_mode="create"
+if [ "$count" != "0" ]; then
+  if [ "${RESTORE_ALLOW_NONEMPTY:-no}" != "yes" ]; then
+    echo "restore refused: target database is not empty; set RESTORE_ALLOW_NONEMPTY=yes after verification" >&2
+    exit 3
+  fi
+  restore_mode="replace"
 fi
 
-pg_restore --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
-  --no-owner --no-privileges ${RESTORE_ALLOW_NONEMPTY:+--clean --if-exists} "$RESTORE_DIR/postgres.dump"
+if [ "$restore_mode" = "replace" ]; then
+  pg_restore --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
+    --no-owner --no-privileges --clean --if-exists "$RESTORE_DIR/postgres.dump"
+else
+  pg_restore --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
+    --no-owner --no-privileges "$RESTORE_DIR/postgres.dump"
+fi
 
 psql --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -v ON_ERROR_STOP=1 <<'SQL'
 SELECT count(*) AS migrations FROM schema_migrations;
