@@ -26,10 +26,14 @@ func (h Handler) Answer(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.AnswerService.Answer(r.Context(), answersvc.Request{Query: r.URL.Query().Get("q")})
 	if err != nil {
 		switch {
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+			writeError(w, http.StatusGatewayTimeout, "answer_timeout")
 		case errors.Is(err, querynorm.ErrEmptyQuery):
 			writeError(w, http.StatusBadRequest, "empty_query")
 		case errors.Is(err, querynorm.ErrQueryTooLong), errors.Is(err, querynorm.ErrInvalidQuery):
 			writeError(w, http.StatusBadRequest, "invalid_query")
+		case errors.Is(err, querynorm.ErrQueryTooComplex):
+			writeError(w, http.StatusBadRequest, "query_too_complex")
 		default:
 			writeError(w, http.StatusBadGateway, "answer_backend_error")
 		}
