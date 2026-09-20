@@ -10,6 +10,10 @@ import (
 	"github.com/venomimonstro/poisk/internal/indexer/outbox"
 )
 
+type OrganizationSource interface {
+	Load(context.Context,int64,int64)(indexmanticore.OrganizationDocument,error)
+}
+
 type OrganizationIndex interface {
 	ApplyOrganization(context.Context,indexmanticore.OrganizationDocument)(bool,error)
 	DeleteOrganization(context.Context,int64,int64) error
@@ -21,7 +25,7 @@ type EventAcker interface {
 }
 
 type Processor struct {
-	Source *Source
+	Source OrganizationSource
 	Index OrganizationIndex
 	Ack EventAcker
 	RetryBase time.Duration
@@ -38,8 +42,6 @@ func (p Processor) Process(ctx context.Context,event outbox.Event)error{
 	case "UPSERT":
 		doc,err:=p.Source.Load(ctx,event.EntityID,event.EntityVersion)
 		if errors.Is(err,ErrOrganizationVersionMismatch){
-			// A newer canonical version exists. The newer outbox event owns index state;
-			// this leased stale event can be acknowledged without writing old data.
 			return p.Ack.MarkProcessed(ctx,event.ID,event.WorkerID)
 		}
 		if errors.Is(err,ErrOrganizationNotFound){return p.retry(ctx,event,err)}
