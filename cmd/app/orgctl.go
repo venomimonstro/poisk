@@ -11,7 +11,10 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	indexmanticore "github.com/venomimonstro/poisk/internal/indexer/manticore"
 	"github.com/venomimonstro/poisk/internal/organizations"
+	orgindex "github.com/venomimonstro/poisk/internal/organizations/indexer"
+	"github.com/venomimonstro/poisk/internal/platform/config"
 )
 
 func organizationImportRoot()string{
@@ -25,7 +28,7 @@ func organizationActor()string{
 }
 
 func runOrgCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
-	if len(args)==0{return errors.New("usage: orgctl source|import|plan|review|promote|status")}
+	if len(args)==0{return errors.New("usage: orgctl source|import|plan|review|promote|status|rebuild-index")}
 	repo:=organizations.NewRepository(pool)
 	switch args[0]{
 	case "source":
@@ -80,8 +83,30 @@ func runOrgCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
 		if len(args)!=2{return errors.New("usage: orgctl status <batch-id>")}
 		batchID,err:=positiveInt64(args[1]);if err!=nil{return err}
 		return printOrgSummary(ctx,repo,batchID)
+	case "rebuild-index":
+		if len(args)!=1{return errors.New("usage: orgctl rebuild-index")}
+		return rebuildOrganizationIndex(ctx,pool)
 	default:return fmt.Errorf("unknown orgctl command %q",args[0])
 	}
+}
+
+func rebuildOrganizationIndex(ctx context.Context,pool *pgxpool.Pool)error{
+	cfg,err:=config.Load();if err!=nil{return err}
+	index,err:=indexmanticore.New(indexmanticore.Config{BaseURL:fmt.Sprintf("http://%s:%d",cfg.ManticoreHost,cfg.ManticoreHTTPPort)});if err!=nil{return err}
+	if err:=index.ResetOrganizationsSchema(ctx);err!=nil{return err}
+	source:=orgindex.NewSource(pool)
+	var after int64
+	var applied int
+	for{
+		docs,err:=source.RebuildBatch(ctx,after,500);if err!=nil{return err}
+		if len(docs)==0{break}
+		for _,doc:=range docs{
+			if _,err:=index.ApplyOrganization(ctx,doc);err!=nil{return fmt.Errorf("rebuild organization %d: %w",doc.ID,err)}
+			after=doc.ID;applied++
+		}
+		if ctx.Err()!=nil{return ctx.Err()}
+	}
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"status":"rebuilt","organizations":applied})
 }
 
 func printOrgSummary(ctx context.Context,repo *organizations.Repository,batchID int64)error{
