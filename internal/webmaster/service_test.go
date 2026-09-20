@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/netip"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +30,7 @@ func (s *serviceStore) ListSites(context.Context,int64)([]Site,error){ return ni
 func (s *serviceStore) OwnedSite(_ context.Context,userID,siteID int64,_ bool)(Site,error){ s.lastUserID=userID; s.lastSiteID=siteID; return s.owned,s.ownedErr }
 func (s *serviceStore) CreateVerification(context.Context,int64,int64,string,[32]byte,string,time.Time)(Verification,error){ return Verification{},errors.New("unused") }
 func (s *serviceStore) MarkVerified(context.Context,int64,int64,string,[32]byte) error { return errors.New("unused") }
-func (s *serviceStore) SubmitSitemap(context.Context,int64,int64,string)(int64,error){ return 0,errors.New("unused") }
+func (s *serviceStore) QueueSitemapSubmission(context.Context,int64,int64,string)(int64,error){ return 0,errors.New("unused") }
 func (s *serviceStore) QueueURLRequest(_ context.Context,userID,siteID int64,url,op string)(int64,error){ s.queueCalls++; s.lastUserID=userID; s.lastSiteID=siteID; s.lastURL=url; s.lastOp=op; return 7,nil }
 func (s *serviceStore) URLStatus(context.Context,int64,int64,string)(URLStatus,error){ return URLStatus{},errors.New("unused") }
 func (s *serviceStore) Metrics(context.Context,int64,int64,time.Time,time.Time)(Metrics,error){ return Metrics{},errors.New("unused") }
@@ -71,7 +70,6 @@ func TestSubmitURLQueuesNormalizedOwnedURL(t *testing.T){
 
 func TestMetaVerificationInstructionIsLiteralHTML(t *testing.T){
 	got:=verificationInstruction(VerificationMeta,"abc")
-	want:=`<meta name="poisk-verification" content="abc">`
-	want=strings.ReplaceAll(want,`\"`,`"`)
+	want:="<meta name=\"poisk-verification\" content=\"abc\">"
 	if got!=want { t.Fatalf("instruction=%q want=%q",got,want) }
 }
