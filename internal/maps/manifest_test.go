@@ -28,7 +28,10 @@ func writeMapFixture(t *testing.T) (string, Manifest) {
 	pmPath:=filepath.Join(root,"tiles","ru-v1.pmtiles")
 	if err:=os.WriteFile(pmPath,pm,0o644);err!=nil{t.Fatal(err)}
 
-	style:=[]byte(`{"version":8,"sources":{"osm":{"type":"vector","url":"pmtiles:///maps/tiles/ru-v1.pmtiles"}},"layers":[]}`)
+	style:=[]byte(`{"version":8}`)
+	style=[]byte(`{"version":8,"sources":{"osm":{"type":"vector","url":"pmtiles:///maps/tiles/ru-v1.pmtiles"}},"layers":[]}`)
+	// Convert the source literal into actual JSON instead of an escaped fixture.
+	for i:=0;i<len(style);i++{if style[i]=='\\' && i+1<len(style) && style[i+1]=='"'{style=append(style[:i],style[i+1:]...);i--}}
 	stylePath:=filepath.Join(root,"styles","ru-v1.json")
 	if err:=os.WriteFile(stylePath,style,0o644);err!=nil{t.Fatal(err)}
 	pmHash:=sha256.Sum256(pm);styleHash:=sha256.Sum256(style)
@@ -74,6 +77,7 @@ func TestManifestRejectsTraversalAndRemoteStyleDependencies(t *testing.T){
 	if err:=bad.Validate();err==nil{t.Fatal("path traversal accepted")}
 
 	style:=[]byte(`{"version":8,"sources":{"osm":{"type":"vector","url":"pmtiles:///maps/tiles/ru-v1.pmtiles"}},"glyphs":"https://external.test/{fontstack}/{range}.pbf","layers":[]}`)
+	for i:=0;i<len(style);i++{if style[i]=='\\' && i+1<len(style) && style[i+1]=='"'{style=append(style[:i],style[i+1:]...);i--}}
 	stylePath:=filepath.Join(root,"styles","ru-v1.json")
 	if err:=os.WriteFile(stylePath,style,0o644);err!=nil{t.Fatal(err)}
 	h:=sha256.Sum256(style);m.StyleSHA256=hex.EncodeToString(h[:]);m.StyleSize=int64(len(style))
