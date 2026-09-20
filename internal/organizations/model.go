@@ -118,7 +118,7 @@ func normalizePhone(raw string) (string, error) {
 	if raw == "" { return "", nil }
 	var digits strings.Builder
 	for _, r := range raw {
-		if unicode.IsDigit(r) { digits.WriteRune(r) }
+		if r >= '0' && r <= '9' { digits.WriteRune(r) }
 	}
 	value := digits.String()
 	if len(value) < 7 || len(value) > 15 { return "", ErrInvalidRow }
