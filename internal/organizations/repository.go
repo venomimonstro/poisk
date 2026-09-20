@@ -61,6 +61,7 @@ type Candidate struct {
 	Website string
 	NormalizedAddress string
 	SourceCount int
+	SourcePayloadHash string
 }
 
 func (r *Repository) EnsureSource(ctx context.Context,key,name string,trust int)error{
@@ -156,23 +157,23 @@ FROM organization_staging_rows WHERE batch_id=$1 AND staging_id>$2 AND state='VA
 
 func (r *Repository) LinkedCandidate(ctx context.Context,sourceKey,sourceRecordID string)(Candidate,bool,error){
 	var c Candidate
-	err:=r.db.QueryRow(ctx,`SELECT o.place_id,o.version,o.normalized_name,COALESCE(o.phone,''),COALESCE(o.website,''),COALESCE(o.normalized_address,''),o.source_count
+	err:=r.db.QueryRow(ctx,`SELECT o.place_id,o.version,o.normalized_name,COALESCE(o.phone,''),COALESCE(o.website,''),COALESCE(o.normalized_address,''),o.source_count,l.source_payload_hash
 FROM organization_source_links l JOIN organizations o ON o.place_id=l.place_id
-WHERE l.source_key=$1 AND l.source_record_id=$2`,sourceKey,sourceRecordID).Scan(&c.PlaceID,&c.Version,&c.NormalizedName,&c.Phone,&c.Website,&c.NormalizedAddress,&c.SourceCount)
+WHERE l.source_key=$1 AND l.source_record_id=$2`,sourceKey,sourceRecordID).Scan(&c.PlaceID,&c.Version,&c.NormalizedName,&c.Phone,&c.Website,&c.NormalizedAddress,&c.SourceCount,&c.SourcePayloadHash)
 	if errors.Is(err,pgx.ErrNoRows){return Candidate{},false,nil}
 	if err!=nil{return Candidate{},false,err}
 	return c,true,nil
 }
 
 func (r *Repository) StrongCandidates(ctx context.Context,row StagedRow)([]Candidate,error){
-	rows,err:=r.db.Query(ctx,`SELECT place_id,version,normalized_name,COALESCE(phone,''),COALESCE(website,''),COALESCE(normalized_address,''),source_count
+	rows,err:=r.db.Query(ctx,`SELECT place_id,version,normalized_name,COALESCE(phone,''),COALESCE(website,''),COALESCE(normalized_address,''),source_count,''
 FROM organizations
 WHERE status IN ('ACTIVE','REVIEW') AND normalized_name=$1 AND (
  ($2<>'' AND phone=$2) OR ($3<>'' AND website=$3) OR ($4<>'' AND normalized_address=$4)
 ) ORDER BY place_id LIMIT 20`,row.NormalizedName,row.Phone,row.Website,row.NormalizedAddress)
 	if err!=nil{return nil,err};defer rows.Close()
 	var out []Candidate
-	for rows.Next(){var c Candidate;if err:=rows.Scan(&c.PlaceID,&c.Version,&c.NormalizedName,&c.Phone,&c.Website,&c.NormalizedAddress,&c.SourceCount);err!=nil{return nil,err};out=append(out,c)}
+	for rows.Next(){var c Candidate;if err:=rows.Scan(&c.PlaceID,&c.Version,&c.NormalizedName,&c.Phone,&c.Website,&c.NormalizedAddress,&c.SourceCount,&c.SourcePayloadHash);err!=nil{return nil,err};out=append(out,c)}
 	return out,rows.Err()
 }
 
