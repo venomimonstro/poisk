@@ -38,7 +38,9 @@ func resetQueueFixture(t *testing.T, pool *pgxpool.Pool) {
 	_, err := pool.Exec(context.Background(), `
 TRUNCATE TABLE index_outbox, crawl_history, crawl_queue, document_versions,
                urls, domains, audit_log, system_settings
-RESTART IDENTITY CASCADE`)
+RESTART IDENTITY CASCADE;
+INSERT INTO system_settings(key,value,updated_at)
+VALUES('resource_pressure','{"state":"NORMAL"}'::jsonb,now())`)
 	if err != nil {
 		t.Fatalf("reset fixture: %v", err)
 	}
