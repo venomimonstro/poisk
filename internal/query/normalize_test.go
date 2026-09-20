@@ -38,3 +38,19 @@ func TestRejectsEmptyAndOversizedQueries(t *testing.T) {
 	if _, err := Normalize("   "); !errors.Is(err, ErrEmptyQuery) { t.Fatalf("err=%v", err) }
 	if _, err := Normalize(strings.Repeat("я", MaxQueryRunes+1)); !errors.Is(err, ErrQueryTooLong) { t.Fatalf("err=%v", err) }
 }
+
+func TestRejectsTooManyTokens(t *testing.T) {
+	parts := make([]string, MaxQueryTokens+1)
+	for i := range parts { parts[i] = "word" }
+	if _, err := Normalize(strings.Join(parts, " ")); !errors.Is(err, ErrQueryTooComplex) { t.Fatalf("err=%v", err) }
+}
+
+func TestRejectsDeepAndUnbalancedOperators(t *testing.T) {
+	for _, raw := range []string{"(((((test)))))", "(test", "test)", strings.Repeat("*", MaxQueryOperators+1)} {
+		if _, err := Normalize(raw); !errors.Is(err, ErrQueryTooComplex) { t.Fatalf("query=%q err=%v", raw, err) }
+	}
+}
+
+func TestRejectsControlCharacters(t *testing.T) {
+	if _, err := Normalize("safe\u0001query"); !errors.Is(err, ErrQueryTooComplex) { t.Fatalf("err=%v", err) }
+}
