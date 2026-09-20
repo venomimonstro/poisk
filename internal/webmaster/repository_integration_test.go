@@ -86,10 +86,25 @@ func TestQueueURLRequestUsesCrawlerAndVersionedDeleteOutbox(t *testing.T){
 func TestWebmasterMetricsAggregateVerifiedHosts(t *testing.T){
 	pool:=webmasterIntegrationDB(t);repo:=NewRepository(pool);ctx:=context.Background()
 	user,site:=createVerifiedSite(t,repo,pool,"owner@example.com","example.test")
+	if _,err:=pool.Exec(ctx,`INSERT INTO urls(domain_id,normalized_url,index_status) VALUES($1,'https://example.test/page','INDEXED')`,site.DomainID);err!=nil{t.Fatal(err)}
 	if err:=repo.RecordSearchImpressions(ctx,[]string{"example.test","example.test","other.test"});err!=nil{t.Fatal(err)}
 	if err:=repo.RecordClick(ctx,"https://example.test/page");err!=nil{t.Fatal(err)}
+	if err:=repo.RecordClick(ctx,"https://example.test/not-indexed");err!=nil{t.Fatal(err)}
 	if err:=repo.RecordAnswerCitations(ctx,[]string{"example.test"});err!=nil{t.Fatal(err)}
 	metrics,err:=repo.Metrics(ctx,user.ID,site.ID,time.Now().Add(-24*time.Hour),time.Now().Add(24*time.Hour));if err!=nil{t.Fatal(err)}
 	if metrics.Impressions!=2 || metrics.Clicks!=1 || metrics.AnswerCitations!=1{t.Fatalf("metrics=%+v",metrics)}
 	if fmt.Sprintf("%.2f",metrics.CTR)!="0.50"{t.Fatalf("ctr=%f",metrics.CTR)}
+}
+
+func TestSitemapLeaseRespectsPolicyAndOwnership(t *testing.T){
+	pool:=webmasterIntegrationDB(t);repo:=NewRepository(pool);ctx:=context.Background()
+	user,site:=createVerifiedSite(t,repo,pool,"owner@example.com","example.test")
+	id,err:=repo.QueueSitemapSubmission(ctx,user.ID,site.ID,"https://example.test/sitemap.xml");if err!=nil{t.Fatal(err)}
+	tasks,err:=repo.LeaseSitemaps(ctx,"wm-test",10,30);if err!=nil{t.Fatal(err)}
+	if len(tasks)!=1 || tasks[0].ID!=id || tasks[0].WorkerID!="wm-test"{t.Fatalf("tasks=%+v",tasks)}
+	if err:=repo.RetrySitemap(ctx,tasks[0],errors.New("temporary"),time.Millisecond);err!=nil{t.Fatal(err)}
+	if _,err:=pool.Exec(ctx,`UPDATE webmaster_sitemaps SET available_at=now()-interval '1 second' WHERE sitemap_id=$1`,id);err!=nil{t.Fatal(err)}
+	if _,err:=pool.Exec(ctx,`UPDATE domains SET policy='BLOCK' WHERE domain_id=$1`,site.DomainID);err!=nil{t.Fatal(err)}
+	tasks,err=repo.LeaseSitemaps(ctx,"wm-test-2",10,30);if err!=nil{t.Fatal(err)}
+	if len(tasks)!=0{t.Fatalf("blocked domain leased: %+v",tasks)}
 }
