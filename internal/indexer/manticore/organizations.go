@@ -19,6 +19,11 @@ func (c *Client) EnsureOrganizationsSchema(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) ResetOrganizationsSchema(ctx context.Context) error {
+	if _,err:=c.execSQL(ctx,"DROP TABLE IF EXISTS "+OrganizationsIndex);err!=nil{return fmt.Errorf("drop organizations index: %w",err)}
+	return c.EnsureOrganizationsSchema(ctx)
+}
+
 func (c *Client) CurrentOrganizationVersion(ctx context.Context,id int64)(int64,bool,error){
 	if id<=0{return 0,false,errors.New("organization id must be positive")}
 	body,err:=c.execSQL(ctx,"SELECT entity_version FROM "+OrganizationsIndex+" WHERE id="+strconv.FormatInt(id,10)+" LIMIT 1")
