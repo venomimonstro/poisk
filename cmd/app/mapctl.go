@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -28,13 +29,21 @@ func newMapService(pool *pgxpool.Pool) *mapsvc.Service {
 
 func runMapCtl(ctx context.Context, pool *pgxpool.Pool, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: mapctl register <manifest> | activate <version> | rollback | status")
+		return errors.New("usage: mapctl manifest|register|activate|rollback|status")
 	}
 	service := newMapService(pool)
 	actor := strings.TrimSpace(os.Getenv("MAP_ACTOR"))
 	if actor == "" { actor = "mapctl" }
 
 	switch args[0] {
+	case "manifest":
+		if len(args) != 6 {
+			return errors.New("usage: mapctl manifest <version> <pmtiles-path> <style-path> <source-key> <attribution>")
+		}
+		manifest, err := mapsvc.BuildManifest(service.ArtifactRoot,args[1],args[2],args[3],args[4],args[5])
+		if err != nil { return fmt.Errorf("build map manifest: %w",err) }
+		encoder:=json.NewEncoder(os.Stdout);encoder.SetIndent("","  ")
+		return encoder.Encode(manifest)
 	case "register":
 		if len(args) != 2 { return errors.New("usage: mapctl register <manifest>") }
 		manifest, err := mapsvc.LoadManifest(service.ArtifactRoot, args[1])
