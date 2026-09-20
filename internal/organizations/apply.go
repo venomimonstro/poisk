@@ -73,7 +73,7 @@ WHERE batch_id=$1 AND worker_id=$2 AND status='APPLYING'`,batchID,workerID)
 
 	if version>0{
 		_,err=tx.Exec(ctx,`INSERT INTO index_outbox(entity_type,entity_id,entity_version,operation,available_at)
-VALUES('ORGANIZATION',$1,$2,'UPSERT',now()) ON CONFLICT(entity_type,entity_id,entity_version,operation) DO NOTHING`,placeID,version)
+VALUES('ORGANIZATION',$1,$2,'UPSERT',now()) ON CONFLICT(entity_type,entity_id,entity_version) DO NOTHING`,placeID,version)
 		if err!=nil{return false,fmt.Errorf("enqueue organization index event: %w",err)}
 	}
 	if _,err=tx.Exec(ctx,`UPDATE organization_import_plans SET applied_at=now() WHERE plan_id=$1 AND applied_at IS NULL`,item.PlanID);err!=nil{return false,err}
