@@ -4,9 +4,9 @@ CREATE TABLE webmaster_users (
     password_hash TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','DISABLED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (lower(email))
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX uq_webmaster_users_email_ci ON webmaster_users(lower(email));
 
 CREATE TABLE webmaster_sessions (
     session_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -86,6 +86,5 @@ CREATE TABLE webmaster_metrics_daily (
     impressions BIGINT NOT NULL DEFAULT 0 CHECK (impressions >= 0),
     clicks BIGINT NOT NULL DEFAULT 0 CHECK (clicks >= 0),
     answer_citations BIGINT NOT NULL DEFAULT 0 CHECK (answer_citations >= 0),
-    PRIMARY KEY(site_id, day),
-    CHECK (clicks <= impressions OR impressions = 0)
+    PRIMARY KEY(site_id, day)
 );
