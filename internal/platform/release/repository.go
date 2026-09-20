@@ -35,7 +35,11 @@ RETURNING release_id,version,build_sha,required_schema_version,COALESCE(map_vers
 func (r Repository) Preflight(ctx context.Context,version,actor string)(Preflight,error){
 	manifest,err:=r.byVersion(ctx,version);if err!=nil{return Preflight{},err};var dbSchema int64;if err:=r.DB.QueryRow(ctx,`SELECT COALESCE(max(version),0) FROM schema_migrations`).Scan(&dbSchema);err!=nil{return Preflight{},err};var activeMap string;_ = r.DB.QueryRow(ctx,`SELECT COALESCE(active_version,'') FROM map_state WHERE singleton=TRUE`).Scan(&activeMap)
 	pass:=dbSchema>=manifest.RequiredSchemaVersion&&manifest.WebIndexSchema==indexmanticore.WebSchemaVersion&&manifest.OrganizationIndexSchema==indexmanticore.OrganizationsSchemaVersion&&manifest.AddressIndexSchema==indexmanticore.AddressesSchemaVersion&&(manifest.MapVersion==""||manifest.MapVersion==activeMap)
-	result:=Preflight{Pass:pass,DatabaseSchema:dbSchema,RequiredSchema:manifest.RequiredSchemaVersion,ActiveMap:activeMap,RequiredMap:manifest.MapVersion};if !pass{_,_=r.DB.Exec(ctx,`INSERT INTO release_events(release_id,action,actor,details) VALUES($1,'FAIL',$2,jsonb_build_object('database_schema',$3,'active_map',$4))`,manifest.ID,actor,dbSchema,activeMap);return result,ErrPreflight};_,err=r.DB.Exec(ctx,`UPDATE app_releases SET preflight_at=now() WHERE release_id=$1; INSERT INTO release_events(release_id,action,actor,details) VALUES($1,'PREFLIGHT',$2,'{}')`,manifest.ID,actor);return result,err
+	result:=Preflight{Pass:pass,DatabaseSchema:dbSchema,RequiredSchema:manifest.RequiredSchemaVersion,ActiveMap:activeMap,RequiredMap:manifest.MapVersion}
+	if !pass{_,_=r.DB.Exec(ctx,`INSERT INTO release_events(release_id,action,actor,details) VALUES($1,'FAIL',$2,jsonb_build_object('database_schema',$3,'active_map',$4))`,manifest.ID,actor,dbSchema,activeMap);return result,ErrPreflight}
+	if _,err=r.DB.Exec(ctx,`UPDATE app_releases SET preflight_at=now() WHERE release_id=$1`,manifest.ID);err!=nil{return result,err}
+	if _,err=r.DB.Exec(ctx,`INSERT INTO release_events(release_id,action,actor,details) VALUES($1,'PREFLIGHT',$2,'{}')`,manifest.ID,actor);err!=nil{return result,err}
+	return result,nil
 }
 
 func (r Repository) Activate(ctx context.Context,version,actor string)error{
