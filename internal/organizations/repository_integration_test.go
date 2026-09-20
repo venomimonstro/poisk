@@ -18,7 +18,9 @@ func organizationIntegrationDB(t *testing.T)*pgxpool.Pool{
 	if err:=pool.Ping(context.Background());err!=nil{pool.Close();t.Fatal(err)}
 	t.Cleanup(pool.Close)
 	_,err=pool.Exec(context.Background(),`TRUNCATE TABLE organization_import_events,organization_merge_review,organization_import_plans,
-organization_source_links,organizations,organization_staging_rows,organization_import_batches,organization_sources,index_outbox RESTART IDENTITY CASCADE`)
+organization_source_links,organizations,organization_staging_rows,organization_import_batches,organization_sources,index_outbox RESTART IDENTITY CASCADE;
+INSERT INTO system_settings(key,value,updated_at) VALUES('resource_pressure','{"state":"NORMAL"}'::jsonb,now())
+ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`)
 	if err!=nil{t.Fatalf("reset organization fixture: %v",err)}
 	return pool
 }
