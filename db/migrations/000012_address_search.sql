@@ -24,6 +24,7 @@ CREATE TABLE address_staging_rows (
     parent_object_id BIGINT CHECK (parent_object_id > 0),
     level SMALLINT CHECK (level BETWEEN 0 AND 99),
     name TEXT,
+    normalized_name TEXT,
     type_name TEXT,
     house_num TEXT,
     add_num1 TEXT,
