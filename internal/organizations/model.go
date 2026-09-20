@@ -10,6 +10,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/net/idna"
 )
 
 var (
@@ -33,21 +35,24 @@ type SourceRow struct {
 }
 
 type NormalizedRow struct {
-	SourceRecordID   string
-	Name             string
-	NormalizedName   string
-	Phone            string
-	Website          string
-	Address          string
+	SourceRecordID    string
+	Name              string
+	NormalizedName    string
+	Phone             string
+	Website           string
+	Address           string
 	NormalizedAddress string
-	CategoryKey      string
-	Latitude         *float64
-	Longitude        *float64
-	PayloadHash      string
-	RawPayload       []byte
+	CategoryKey       string
+	Latitude          *float64
+	Longitude         *float64
+	PayloadHash       string
+	RawPayload        []byte
 }
 
 func NormalizeSourceRow(row SourceRow) (NormalizedRow, error) {
+	rawPayload, err := json.Marshal(row)
+	if err != nil || len(rawPayload) == 0 || len(rawPayload) > maxRawPayloadBytes { return NormalizedRow{}, ErrInvalidRow }
+
 	row.SourceRecordID = strings.TrimSpace(row.SourceRecordID)
 	row.Name = compactText(row.Name)
 	if row.SourceRecordID == "" || len(row.SourceRecordID) > 256 || row.Name == "" || utf8.RuneCountInString(row.Name) > 300 {
@@ -79,13 +84,12 @@ func NormalizeSourceRow(row SourceRow) (NormalizedRow, error) {
 		Longitude *float64 `json:"longitude,omitempty"`
 	}{row.SourceRecordID,row.Name,phone,website,address,category,row.Latitude,row.Longitude})
 	if err != nil { return NormalizedRow{}, err }
-	if len(canonical) > maxRawPayloadBytes { return NormalizedRow{}, ErrInvalidRow }
 	sum := sha256.Sum256(canonical)
 	return NormalizedRow{
 		SourceRecordID: row.SourceRecordID, Name: row.Name, NormalizedName: normalizedName,
 		Phone: phone, Website: website, Address: address, NormalizedAddress: normalizedAddress,
 		CategoryKey: category, Latitude: row.Latitude, Longitude: row.Longitude,
-		PayloadHash: hex.EncodeToString(sum[:]), RawPayload: canonical,
+		PayloadHash: hex.EncodeToString(sum[:]), RawPayload: rawPayload,
 	}, nil
 }
 
@@ -129,16 +133,16 @@ func normalizeWebsite(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Hostname() == "" { return "", ErrInvalidRow }
 	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if host == "" || strings.ContainsAny(host, " /\\") { return "", ErrInvalidRow }
+	host, err = idna.Lookup.ToASCII(host)
+	if err != nil || host == "" || strings.ContainsAny(host, " /\\") { return "", ErrInvalidRow }
 	port := u.Port()
 	if port != "" && !((u.Scheme == "http" && port == "80") || (u.Scheme == "https" && port == "443")) { return "", ErrInvalidRow }
 	u.Scheme = "https"
 	u.Host = host
 	u.RawQuery = ""
 	u.Fragment = ""
-	path := strings.TrimRight(u.EscapedPath(), "/")
-	if path == "" { path = "/" }
-	u.Path = path
 	u.RawPath = ""
+	u.Path = strings.TrimRight(u.Path, "/")
+	if u.Path == "" { u.Path = "/" }
 	return u.String(), nil
 }
