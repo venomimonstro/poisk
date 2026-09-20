@@ -158,7 +158,7 @@ func verificationInstruction(method,token string) string {
 	switch method {
 	case VerificationDNS: return "Create TXT record _poisk-verification with value poisk-verification="+token
 	case VerificationFile: return "Publish the token at /.well-known/poisk-verification/"+url.PathEscape(token)+".txt"
-	case VerificationMeta: return `<meta name="poisk-verification" content="`+token+`">`
+	case VerificationMeta: return "<meta name=\"poisk-verification\" content=\""+token+"\">"
 	default: return ""
 	}
 }
