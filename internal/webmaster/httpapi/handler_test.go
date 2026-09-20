@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +13,8 @@ import (
 func TestRegisterUnavailableWithoutService(t *testing.T){
 	h:=Handler{}
 	rr:=httptest.NewRecorder()
-	h.Register(rr,httptest.NewRequest(http.MethodPost,"/api/webmaster/register",strings.NewReader(`{"email":"a@b.com","password":"long-enough-password"}`)))
+	body:="{\"email\":\"a@b.com\",\"password\":\"long-enough-password\"}"
+	h.Register(rr,httptest.NewRequest(http.MethodPost,"/api/webmaster/register",strings.NewReader(body)))
 	if rr.Code!=http.StatusServiceUnavailable{t.Fatalf("status=%d",rr.Code)}
 }
 
@@ -40,16 +40,16 @@ func TestClickTrackingAcceptsSingleJSONObject(t *testing.T){
 	recorder:=&clickRecorderFake{}
 	h:=TrackingHandler{Recorder:recorder}
 	rr:=httptest.NewRecorder()
-	h.Click(rr,httptest.NewRequest(http.MethodPost,"/api/click",strings.NewReader(`{"url":"https://example.com/a"}`)))
+	body:="{\"url\":\"https://example.com/a\"}"
+	h.Click(rr,httptest.NewRequest(http.MethodPost,"/api/click",strings.NewReader(body)))
 	if rr.Code!=http.StatusNoContent || recorder.calls!=1{t.Fatalf("status=%d calls=%d",rr.Code,recorder.calls)}
 }
 
 func TestClickTrackingRejectsBadPayloadAndTimeout(t *testing.T){
 	h:=TrackingHandler{Recorder:&clickRecorderFake{}}
-	rr:=httptest.NewRecorder();h.Click(rr,httptest.NewRequest(http.MethodPost,"/api/click",strings.NewReader(`{"url":"x"}{"url":"y"}`)))
+	rr:=httptest.NewRecorder();h.Click(rr,httptest.NewRequest(http.MethodPost,"/api/click",strings.NewReader("{\"url\":\"x\"}{\"url\":\"y\"}")))
 	if rr.Code!=http.StatusBadRequest{t.Fatalf("trailing status=%d",rr.Code)}
 	h=TrackingHandler{Recorder:&clickRecorderFake{err:context.DeadlineExceeded}}
-	rr=httptest.NewRecorder();h.Click(rr,httptest.NewRequest(http.MethodPost,"/api/click",strings.NewReader(`{"url":"https://example.com"}`)))
+	rr=httptest.NewRecorder();h.Click(rr,httptest.NewRequest(http.MethodPost,"/api/click",strings.NewReader("{\"url\":\"https://example.com\"}")))
 	if rr.Code!=http.StatusGatewayTimeout{t.Fatalf("timeout status=%d",rr.Code)}
-	if !errors.Is(context.DeadlineExceeded,context.DeadlineExceeded){t.Fatal("unreachable")}
 }
