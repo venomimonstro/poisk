@@ -146,13 +146,13 @@ func runIndexer(cfg config.Config, pool *pgxpool.Pool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	index, err := indexmanticore.New(indexmanticore.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
-	if err != nil { return fmt.Errorf("create manticore index client: %w", err) }
+	if err != nil { return fmt.Errorf("create search index client: %w", err) }
 	if err := index.EnsureSchema(ctx); err != nil { return fmt.Errorf("ensure web index schema: %w", err) }
-	outboxRepo := outbox.NewRepository(pool)
+	outboxRepo := outbox.NewRepositoryForEntityTypes(pool, indexworker.WebDocumentEntity)
 	sourceRepo := source.NewRepository(pool)
 	processor := &indexworker.Processor{Source:sourceRepo,Index:index,Ack:outboxRepo,RetryBase:time.Second,RetryMax:time.Minute}
 	runner := indexworker.Runner{Leases:outboxRepo,Processor:processor,WorkerID:fmt.Sprintf("indexer-%d",os.Getpid()),BatchSize:32,LeaseSeconds:30,PollInterval:500*time.Millisecond}
-	slog.Info("indexer worker started", "worker_id", runner.WorkerID)
+	slog.Info("indexer worker started", "worker_id", runner.WorkerID, "entity_type", indexworker.WebDocumentEntity)
 	return runner.Run(ctx)
 }
 
