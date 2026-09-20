@@ -14,15 +14,6 @@ func TestSearchBuildsServerSideFilters(t *testing.T){
 		if r.URL.Path!="/search"{t.Fatalf("path=%s",r.URL.Path)}
 		if err:=json.NewDecoder(r.Body).Decode(&payload);err!=nil{t.Fatal(err)}
 		w.Header().Set("Content-Type","application/json")
-		_,_=w.Write([]byte(`{"took":1}`))
-	}))
-	defer server.Close()
-
-	// Replace the response handler with valid JSON by creating the actual payload here.
-	server.Config.Handler=http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-		if r.URL.Path!="/search"{t.Fatalf("path=%s",r.URL.Path)}
-		if err:=json.NewDecoder(r.Body).Decode(&payload);err!=nil{t.Fatal(err)}
-		w.Header().Set("Content-Type","application/json")
 		response:=map[string]any{
 			"took":1,"timed_out":false,
 			"hits":map[string]any{"total":1,"hits":[]any{map[string]any{
@@ -31,7 +22,8 @@ func TestSearchBuildsServerSideFilters(t *testing.T){
 			}}},
 		}
 		_ = json.NewEncoder(w).Encode(response)
-	})
+	}))
+	defer server.Close()
 
 	client,err:=New(Config{BaseURL:server.URL});if err!=nil{t.Fatal(err)}
 	lat,lon:=55.75,37.62
