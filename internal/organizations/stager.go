@@ -48,11 +48,11 @@ func (s Stager) StageJSONL(ctx context.Context,batchID int64,input io.Reader)err
 				}else{
 					row,decodeErr:=adapter.Decode(raw)
 					if decodeErr!=nil{
-						if _,stageErr:=s.Store.StageRejected(ctx,batchID,rowNumber,"",raw,"INVALID_JSON",truncateDiagnostic(decodeErr.Error()));stageErr!=nil{return stageErr}
+						if _,stageErr:=s.Store.StageRejected(ctx,batchID,rowNumber,"",raw,"INVALID_JSON",truncateRunesOrg(decodeErr.Error(),512));stageErr!=nil{return stageErr}
 					}else{
 						normalized,normErr:=NormalizeSourceRow(row)
 						if normErr!=nil{
-							if _,stageErr:=s.Store.StageRejected(ctx,batchID,rowNumber,strings.TrimSpace(row.SourceRecordID),raw,"INVALID_ROW",truncateDiagnostic(normErr.Error()));stageErr!=nil{return stageErr}
+							if _,stageErr:=s.Store.StageRejected(ctx,batchID,rowNumber,strings.TrimSpace(row.SourceRecordID),raw,"INVALID_ROW",truncateRunesOrg(normErr.Error(),512));stageErr!=nil{return stageErr}
 						}else if _,stageErr:=s.Store.StageValid(ctx,batchID,rowNumber,normalized);stageErr!=nil{return stageErr}
 					}
 				}
@@ -80,5 +80,8 @@ func readBoundedLine(reader *bufio.Reader,limit int)([]byte,bool,error){
 	}
 }
 
-func truncateDiagnostic(value string)string{value=strings.TrimSpace(value);if len(value)>512{return value[:512]};return value}
+func truncateRunesOrg(value string,max int)string{
+	value=strings.TrimSpace(value);if max<=0{return ""}
+	runes:=[]rune(value);if len(runes)>max{return string(runes[:max])};return value
+}
 func minIntOrg(a,b int)int{if a<b{return a};return b}
