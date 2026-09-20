@@ -64,6 +64,8 @@ func run() error {
 		return runAPI(cfg, pool)
 	case "indexer":
 		return runIndexer(cfg, pool)
+	case "webmaster-worker":
+		return runWebmasterWorker(pool)
 	case "quality":
 		return runQuality(cfg)
 	default:
@@ -73,7 +75,6 @@ func run() error {
 
 func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	checker := health.Checker{DB: pool, ManticoreHost: cfg.ManticoreHost, ManticoreSQLPort: cfg.ManticoreSQLPort}
-
 	searchBackend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create search backend: %w", err) }
 	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512), BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent)}
@@ -92,14 +93,8 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	proofFetcher := crawlerfetcher.New(proofCfg, validator)
 	defer proofFetcher.CloseIdleConnections()
 	webmasterRepo := webmaster.NewRepository(pool)
-	webmasterService := &webmaster.Service{
-		Store: webmasterRepo,
-		Validator: validator,
-		Verifier: webmaster.Verifier{Fetcher: proofFetcher},
-		SessionTTL: 7 * 24 * time.Hour,
-		VerificationTTL: 30 * time.Minute,
-	}
-	webmasterHandler := webmasterhttp.Handler{Service: webmasterService}
+	webmasterService := &webmaster.Service{Store:webmasterRepo,Validator:validator,Verifier:webmaster.Verifier{Fetcher:proofFetcher},SessionTTL:7*24*time.Hour,VerificationTTL:30*time.Minute}
+	webmasterHandler := webmasterhttp.Handler{Service:webmasterService}
 
 	latencyRecorder := platformmetrics.NewLatencyRecorder(4096)
 	apiLimiter := guard.NewLimiter(cfg.APIRatePerSecond, cfg.APIRateBurst, cfg.APIRateClients, cfg.APIRateIdleTTL)
@@ -151,6 +146,25 @@ func runIndexer(cfg config.Config, pool *pgxpool.Pool) error {
 	processor := &indexworker.Processor{Source:sourceRepo,Index:index,Ack:outboxRepo,RetryBase:time.Second,RetryMax:time.Minute}
 	runner := indexworker.Runner{Leases:outboxRepo,Processor:processor,WorkerID:fmt.Sprintf("indexer-%d",os.Getpid()),BatchSize:32,LeaseSeconds:30,PollInterval:500*time.Millisecond}
 	slog.Info("indexer worker started", "worker_id", runner.WorkerID)
+	return runner.Run(ctx)
+}
+
+func runWebmasterWorker(pool *pgxpool.Pool) error {
+	ctx,stop:=signal.NotifyContext(context.Background(),syscall.SIGINT,syscall.SIGTERM)
+	defer stop()
+	validator:=crawlersecurity.NewValidator()
+	fetchCfg:=crawlerfetcher.DefaultConfig()
+	fetchCfg.UserAgent="PoiskWebmasterSitemap/1.0"
+	fetchCfg.MaxBodyBytes=8<<20
+	fetchCfg.MaxRedirects=5
+	fetchCfg.MaxRetries=2
+	fetchCfg.RequestTimeout=20*time.Second
+	fetcher:=crawlerfetcher.New(fetchCfg,validator)
+	defer fetcher.CloseIdleConnections()
+	repo:=webmaster.NewRepository(pool)
+	processor:=webmaster.SitemapProcessor{Store:repo,Fetcher:fetcher}
+	runner:=webmaster.SitemapRunner{Store:repo,Processor:processor,WorkerID:fmt.Sprintf("webmaster-%d",os.Getpid()),BatchSize:4,LeaseSeconds:45,PollInterval:time.Second}
+	slog.Info("webmaster sitemap worker started","worker_id",runner.WorkerID)
 	return runner.Run(ctx)
 }
 
