@@ -36,8 +36,8 @@ func (c *Client) ApplyOrganization(ctx context.Context,doc OrganizationDocument)
 	if doc.SourceCount<0{return false,errors.New("organization source count cannot be negative")}
 	current,exists,err:=c.CurrentOrganizationVersion(ctx,doc.ID);if err!=nil{return false,err}
 	if exists&&current>doc.EntityVersion{return false,nil}
-	q:="REPLACE INTO "+OrganizationsIndex+" (id,name,address,category_key,phone,website,normalized_name,normalized_address,latitude,longitude,has_location,quality_score,source_count,entity_version,status) VALUES ("+
-		strconv.FormatInt(doc.ID,10)+","+quote(doc.Name)+","+quote(doc.Address)+","+quote(doc.CategoryKey)+","+quote(doc.Phone)+","+quote(doc.Website)+","+
+	q:="REPLACE INTO "+OrganizationsIndex+" (id,name,address,city_key,category_key,phone,website,normalized_name,normalized_address,latitude,longitude,has_location,quality_score,source_count,entity_version,status) VALUES ("+
+		strconv.FormatInt(doc.ID,10)+","+quote(doc.Name)+","+quote(doc.Address)+","+quote(doc.CityKey)+","+quote(doc.CategoryKey)+","+quote(doc.Phone)+","+quote(doc.Website)+","+
 		quote(doc.NormalizedName)+","+quote(doc.NormalizedAddress)+","+strconv.FormatFloat(doc.Latitude,'f',7,64)+","+strconv.FormatFloat(doc.Longitude,'f',7,64)+","+
 		boolSQL(doc.HasLocation)+","+strconv.FormatFloat(clamp100(doc.QualityScore),'f',-1,64)+","+strconv.Itoa(doc.SourceCount)+","+
 		strconv.FormatInt(doc.EntityVersion,10)+","+quote(doc.Status)+")"
