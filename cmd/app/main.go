@@ -67,8 +67,12 @@ func run() error {
 		return runIndexer(cfg, pool)
 	case "webmaster-worker":
 		return runWebmasterWorker(pool)
+	case "organizations-worker":
+		return runOrganizationsWorker(pool)
 	case "mapctl":
 		return runMapCtl(ctx, pool, os.Args[2:])
+	case "orgctl":
+		return runOrgCtl(ctx, pool, os.Args[2:])
 	case "quality":
 		return runQuality(cfg)
 	default:
