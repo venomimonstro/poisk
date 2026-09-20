@@ -7,8 +7,8 @@ import (
 )
 
 // LeaseType isolates workers by entity type so a WEB_DOCUMENT indexer can never
-// consume future ORGANIZATION or ADDRESS events. Under CRITICAL resource pressure
-// no new heavy index leases are granted; already leased work can still finish.
+// consume future ORGANIZATION or ADDRESS events. Under CRITICAL or stale resource
+// pressure no new heavy index leases are granted; already leased work can finish.
 func (r *Repository) LeaseType(ctx context.Context, workerID, entityType string, batchSize, leaseSeconds int32) ([]Event, error) {
 	if workerID == "" { return nil, errors.New("worker id is required") }
 	if entityType == "" { return nil, errors.New("entity type is required") }
@@ -23,7 +23,12 @@ WITH picked AS (
       AND candidate.status IN ('READY','RETRY')
       AND candidate.available_at <= now()
       AND candidate.attempts < candidate.max_attempts
-      AND COALESCE((SELECT value->>'state' FROM system_settings WHERE key='resource_pressure'),'NORMAL') <> 'CRITICAL'
+      AND EXISTS (
+          SELECT 1 FROM system_settings s
+          WHERE s.key='resource_pressure'
+            AND s.updated_at >= now()-interval '60 seconds'
+            AND COALESCE(s.value->>'state','CRITICAL') <> 'CRITICAL'
+      )
       AND NOT EXISTS (
           SELECT 1
           FROM index_outbox AS newer
