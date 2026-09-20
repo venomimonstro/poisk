@@ -96,6 +96,11 @@ func (r *Repository) LeaseReadyApply(ctx context.Context,workerID string,lease t
 	err:=r.db.QueryRow(ctx,`WITH picked AS (
  SELECT b.batch_id FROM organization_import_batches b
  WHERE b.mode='APPLY' AND b.status='PLANNED'
+ AND EXISTS (
+   SELECT 1 FROM system_settings s WHERE s.key='resource_pressure'
+   AND s.updated_at>=now()-interval '60 seconds'
+   AND COALESCE(s.value->>'state','CRITICAL')<>'CRITICAL'
+ )
  AND NOT EXISTS(SELECT 1 FROM organization_import_plans p WHERE p.batch_id=b.batch_id AND p.action='REVIEW')
  ORDER BY b.batch_id FOR UPDATE OF b SKIP LOCKED LIMIT 1
 )
