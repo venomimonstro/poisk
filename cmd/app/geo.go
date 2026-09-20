@@ -17,5 +17,6 @@ func registerGeoRoute(router chi.Router, apiGuard guard.Middleware, cfg config.C
 	service := &geosvc.Service{Backend: backend, MaxCandidates: 200}
 	handler := geohttp.Handler{Service: service}
 	router.With(apiGuard.Protect).Get("/api/geo/search", handler.Search)
+	router.With(apiGuard.Protect).Get("/api/geo/viewport", handler.Viewport)
 	return nil
 }
