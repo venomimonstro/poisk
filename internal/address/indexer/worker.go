@@ -10,10 +10,11 @@ import (
 	"github.com/venomimonstro/poisk/internal/indexer/outbox"
 )
 
+type AddressSource interface{Load(context.Context,int64,int64)(indexmanticore.AddressDocument,error)}
 type AddressIndex interface{ApplyAddress(context.Context,indexmanticore.AddressDocument)(bool,error);DeleteAddress(context.Context,int64,int64)error}
 type EventAcker interface{MarkProcessed(context.Context,int64,string)error;Retry(context.Context,int64,string,string,time.Duration)error}
 
-type Processor struct{Source *Source;Index AddressIndex;Ack EventAcker;RetryBase,RetryMax time.Duration}
+type Processor struct{Source AddressSource;Index AddressIndex;Ack EventAcker;RetryBase,RetryMax time.Duration}
 
 func (p Processor) Process(ctx context.Context,event outbox.Event)error{
 	if p.Source==nil||p.Index==nil||p.Ack==nil{return errors.New("address index processor is not initialized")}
