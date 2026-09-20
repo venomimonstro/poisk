@@ -15,8 +15,13 @@ type Searcher interface {
 	Search(ctx context.Context, req searchsvc.Request) (searchsvc.Response, error)
 }
 
+type ImpressionRecorder interface {
+	RecordSearchImpressions(context.Context, []string) error
+}
+
 type Handler struct {
 	SearchService Searcher
+	Impressions   ImpressionRecorder
 }
 
 func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +53,11 @@ func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadGateway, "search_backend_error")
 		}
 		return
+	}
+	if h.Impressions != nil && len(resp.Results) > 0 {
+		hosts := make([]string, 0, len(resp.Results))
+		for _, result := range resp.Results { if result.Host != "" { hosts = append(hosts, result.Host) } }
+		_ = h.Impressions.RecordSearchImpressions(r.Context(), hosts)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
