@@ -59,7 +59,7 @@ RETURNING url_id,version`,siteDomainID,normalizedURL).Scan(&urlID,&version)
 		if _,err=tx.Exec(ctx, `
 INSERT INTO index_outbox(entity_type,entity_id,entity_version,operation,available_at)
 VALUES('WEB_DOCUMENT',$1,$2,'DELETE',now())
-ON CONFLICT(entity_type,entity_id,entity_version,operation) DO NOTHING`,urlID,version); err!=nil { return 0,fmt.Errorf("enqueue webmaster delete: %w",err) }
+ON CONFLICT(entity_type,entity_id,entity_version) DO NOTHING`,urlID,version); err!=nil { return 0,fmt.Errorf("enqueue webmaster delete: %w",err) }
 	default:
 		return 0, ErrInvalidInput
 	}
