@@ -24,6 +24,7 @@ const (
 var (
 	ErrInvalidManifest = errors.New("invalid map manifest")
 	versionPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	sourcePattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 )
 
 type Manifest struct {
@@ -51,7 +52,9 @@ func (m Manifest) Validate() error {
 	if m.Bounds[1] < -90 || m.Bounds[1] >= m.Bounds[3] || m.Bounds[3] > 90 { return ErrInvalidManifest }
 	if m.MinZoom<0 || m.MaxZoom>24 || m.MinZoom>m.MaxZoom { return ErrInvalidManifest }
 	if m.Center[0]<m.Bounds[0] || m.Center[0]>m.Bounds[2] || m.Center[1]<m.Bounds[1] || m.Center[1]>m.Bounds[3] || m.Center[2]<float64(m.MinZoom) || m.Center[2]>float64(m.MaxZoom) { return ErrInvalidManifest }
-	if strings.TrimSpace(m.SourceName)=="" || len(m.SourceName)>200 || strings.TrimSpace(m.AttributionHTML)=="" || len(m.AttributionHTML)>2000 { return ErrInvalidManifest }
+	if !sourcePattern.MatchString(strings.TrimSpace(m.SourceName)) { return ErrInvalidManifest }
+	attribution:=strings.TrimSpace(m.AttributionHTML)
+	if attribution=="" || len(attribution)>2000 || strings.ContainsAny(attribution,"<>\r\n") { return ErrInvalidManifest }
 	return nil
 }
 
@@ -112,7 +115,7 @@ func validatePMTilesHeader(path string,m Manifest)error{
 	header:=make([]byte,pmtilesHeaderSize)
 	if _,err:=io.ReadFull(f,header);err!=nil{return ErrInvalidManifest}
 	if string(header[:7])!="PMTiles" || header[7]!=3{return ErrInvalidManifest}
-	if header[99]!=1 && header[99]!=6{return ErrInvalidManifest}
+	if header[99]!=1{return ErrInvalidManifest}
 	if int(header[100])!=m.MinZoom || int(header[101])!=m.MaxZoom{return ErrInvalidManifest}
 
 	bounds:=[4]float64{
@@ -146,22 +149,20 @@ func validateStyleFile(path string,m Manifest)error{
 	var extra any;if err:=dec.Decode(&extra);err!=io.EOF{return ErrInvalidManifest}
 	if version,ok:=style["version"].(float64);!ok || version!=8{return ErrInvalidManifest}
 	if _,hasImports:=style["imports"];hasImports{return ErrInvalidManifest}
-	sources,ok:=style["sources"].(map[string]any);if !ok || len(sources)==0{return ErrInvalidManifest}
+	sources,ok:=style["sources"].(map[string]any);if !ok || len(sources)!=1{return ErrInvalidManifest}
 	wanted:="pmtiles:///maps/"+m.PMTilesPath
 	boundSource,ok:=sources[m.SourceName].(map[string]any);if !ok{return ErrInvalidManifest}
 	if sourceType,ok:=boundSource["type"].(string);!ok || sourceType!="vector"{return ErrInvalidManifest}
 	if u,ok:=boundSource["url"].(string);!ok || strings.TrimSpace(u)!=wanted{return ErrInvalidManifest}
-
-	for _,raw:=range sources{
-		source,ok:=raw.(map[string]any);if !ok{return ErrInvalidManifest}
-		if u,ok:=source["url"].(string);ok{
-			u=strings.TrimSpace(u)
-			if u==wanted{continue}
-			lower:=strings.ToLower(u)
-			if strings.HasPrefix(lower,"http://") || strings.HasPrefix(lower,"https://") || strings.HasPrefix(lower,"pmtiles://"){return ErrInvalidManifest}
-		}
-		if tiles,ok:=source["tiles"].([]any);ok{for _,tile:=range tiles{if s,ok:=tile.(string);ok{lower:=strings.ToLower(strings.TrimSpace(s));if strings.HasPrefix(lower,"http://")||strings.HasPrefix(lower,"https://"){return ErrInvalidManifest}}}}
+	if _,hasTiles:=boundSource["tiles"];hasTiles{return ErrInvalidManifest}
+	for _,key:=range []string{"sprite","glyphs"}{
+		if value,ok:=style[key].(string);ok && !safeStyleAssetRef(value){return ErrInvalidManifest}
 	}
-	for _,key:=range []string{"sprite","glyphs"}{if value,ok:=style[key].(string);ok{lower:=strings.ToLower(strings.TrimSpace(value));if strings.HasPrefix(lower,"http://")||strings.HasPrefix(lower,"https://"){return ErrInvalidManifest}}}
 	return nil
+}
+
+func safeStyleAssetRef(value string)bool{
+	value=strings.TrimSpace(value)
+	if value=="" || !strings.HasPrefix(value,"/maps/") || strings.Contains(value,"..") || strings.Contains(value,"\\") || strings.Contains(value,"://"){return false}
+	return true
 }
