@@ -56,13 +56,27 @@ CREATE INDEX idx_webmaster_verification_expiry ON webmaster_verifications(expire
 CREATE TABLE webmaster_sitemaps (
     sitemap_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     site_id BIGINT NOT NULL REFERENCES webmaster_sites(site_id) ON DELETE CASCADE,
+    parent_sitemap_id BIGINT REFERENCES webmaster_sitemaps(sitemap_id) ON DELETE SET NULL,
     sitemap_url TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'SUBMITTED' CHECK (status IN ('SUBMITTED','QUEUED','FETCHED','FAILED','DELETED')),
+    depth SMALLINT NOT NULL DEFAULT 0 CHECK (depth BETWEEN 0 AND 8),
+    status TEXT NOT NULL DEFAULT 'SUBMITTED' CHECK (status IN ('SUBMITTED','LEASED','RETRY','FETCHED','FAILED','DELETED')),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    max_attempts INTEGER NOT NULL DEFAULT 4 CHECK (max_attempts > 0),
+    available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_until TIMESTAMPTZ,
+    worker_id TEXT,
     last_error TEXT,
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(site_id, sitemap_url)
+    UNIQUE(site_id, sitemap_url),
+    CHECK ((status='LEASED' AND lease_until IS NOT NULL AND worker_id IS NOT NULL) OR status<>'LEASED')
 );
+CREATE INDEX idx_webmaster_sitemaps_schedule
+    ON webmaster_sitemaps(available_at,sitemap_id)
+    WHERE status IN ('SUBMITTED','RETRY');
+CREATE INDEX idx_webmaster_sitemaps_expired
+    ON webmaster_sitemaps(lease_until)
+    WHERE status='LEASED';
 
 CREATE TABLE webmaster_url_requests (
     request_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
