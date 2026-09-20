@@ -12,9 +12,14 @@ var (
 	buildPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 )
 
-func validReleaseVersion(v string) bool { return versionPattern.MatchString(strings.TrimSpace(v)) }
-func validBuildSHA(v string) bool { return buildPattern.MatchString(strings.TrimSpace(v)) }
-func validImageRef(v string) bool { return imageRefPattern.MatchString(strings.TrimSpace(v)) }
+func ValidManifestFields(version, buildSHA, configHash, backendImage, frontendImage string) bool {
+	return versionPattern.MatchString(strings.TrimSpace(version)) &&
+		buildPattern.MatchString(strings.TrimSpace(buildSHA)) &&
+		validSHA256(configHash) &&
+		imageRefPattern.MatchString(strings.TrimSpace(backendImage)) &&
+		imageRefPattern.MatchString(strings.TrimSpace(frontendImage))
+}
+
 func validSHA256(v string) bool {
 	v = strings.TrimSpace(v)
 	if len(v) != 64 { return false }
