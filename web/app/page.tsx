@@ -96,6 +96,9 @@ export default function HomePage() {
           <input aria-label="Поисковый запрос" placeholder="Найдите или спросите что угодно" value={query} onChange={(event) => setQuery(event.target.value)} maxLength={256} autoComplete="off" />
           <button type="submit" disabled={loading || query.trim().length === 0}>{loading ? "Ищем…" : "Найти"}</button>
         </form>
+        <nav className="productLinks" aria-label="Разделы поиска">
+          <a href="/map">Карта</a>
+        </nav>
       </section>
       {error && <div className="searchState searchError" role="alert">{error}</div>}
       {data && (
