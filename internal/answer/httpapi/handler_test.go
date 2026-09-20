@@ -38,13 +38,15 @@ func TestHandlerReturnsAnswerJSON(t *testing.T) {
 	if rr.Header().Get("X-Content-Type-Options") != "nosniff" { t.Fatal("missing nosniff") }
 }
 
-func TestHandlerMapsQueryAndBackendErrors(t *testing.T) {
+func TestHandlerMapsQueryBackendAndDeadlineErrors(t *testing.T) {
 	cases := []struct {
 		err  error
 		want int
 	}{
 		{querynorm.ErrEmptyQuery, http.StatusBadRequest},
 		{querynorm.ErrQueryTooLong, http.StatusBadRequest},
+		{querynorm.ErrQueryTooComplex, http.StatusBadRequest},
+		{context.DeadlineExceeded, http.StatusGatewayTimeout},
 		{errors.New("backend down"), http.StatusBadGateway},
 	}
 	for _, tc := range cases {
