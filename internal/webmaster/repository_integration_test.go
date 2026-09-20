@@ -25,7 +25,8 @@ func webmasterIntegrationDB(t *testing.T) *pgxpool.Pool {
 TRUNCATE TABLE webmaster_metrics_daily,webmaster_url_requests,webmaster_sitemaps,
 webmaster_verifications,webmaster_sites,webmaster_sessions,webmaster_users,
 index_outbox,crawl_history,crawl_queue,document_versions,urls,domains,audit_log,system_settings
-RESTART IDENTITY CASCADE`)
+RESTART IDENTITY CASCADE;
+INSERT INTO system_settings(key,value,updated_at) VALUES('resource_pressure','{"state":"NORMAL"}'::jsonb,now())`)
 	if err!=nil{t.Fatalf("reset fixture: %v",err)}
 	return pool
 }
