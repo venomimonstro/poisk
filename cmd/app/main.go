@@ -81,6 +81,8 @@ func run() error {
 		return runOrgCtl(ctx, pool, os.Args[2:])
 	case "addressctl":
 		return runAddressCtl(ctx, cfg, pool, os.Args[2:])
+	case "indexctl":
+		return runIndexCtl(ctx, cfg, pool, os.Args[2:])
 	case "adminctl":
 		return runAdminCtl(ctx, pool, os.Args[2:])
 	case "releasectl":
