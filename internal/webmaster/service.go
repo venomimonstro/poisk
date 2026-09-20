@@ -25,7 +25,7 @@ type Store interface {
 	CreateVerification(context.Context,int64,int64,string,[32]byte,string,time.Time)(Verification,error)
 	MarkVerified(context.Context,int64,int64,string,[32]byte) error
 	SubmitSitemap(context.Context,int64,int64,string)(int64,error)
-	SubmitURLRequest(context.Context,int64,int64,string,string)(int64,error)
+	QueueURLRequest(context.Context,int64,int64,string,string)(int64,error)
 	URLStatus(context.Context,int64,int64,string)(URLStatus,error)
 	Metrics(context.Context,int64,int64,time.Time,time.Time)(Metrics,error)
 }
@@ -64,7 +64,6 @@ func (s *Service) Login(ctx context.Context,email,password string)(Session,error
 	email,err:=normalizeEmail(email); if err!=nil { return Session{},ErrUnauthorized }
 	user,err:=s.Store.UserByEmail(ctx,email)
 	if err!=nil {
-		// Keep missing-user login on the expensive hash path to reduce account enumeration by timing.
 		_,_ = wmauth.HashPassword(password)
 		return Session{},ErrUnauthorized
 	}
@@ -74,6 +73,7 @@ func (s *Service) Login(ctx context.Context,email,password string)(Session,error
 }
 
 func (s *Service) Authenticate(ctx context.Context,token string)(User,error){
+	if s==nil || s.Store==nil { return User{},ErrUnauthorized }
 	hash,err:=wmauth.HashToken(strings.TrimSpace(token)); if err!=nil { return User{},ErrUnauthorized }
 	return s.Store.UserBySession(ctx,hash)
 }
@@ -82,6 +82,8 @@ func (s *Service) Logout(ctx context.Context,userID int64,token string) error {
 	hash,err:=wmauth.HashToken(strings.TrimSpace(token)); if err!=nil { return ErrUnauthorized }
 	return s.Store.DeleteSession(ctx,userID,hash)
 }
+
+func (s *Service) Sites(ctx context.Context,userID int64)([]Site,error){ return s.Store.ListSites(ctx,userID) }
 
 func (s *Service) AddSite(ctx context.Context,userID int64,rawOrigin string)(Site,error){
 	origin,err:=ValidateSiteOrigin(ctx,s.Validator,rawOrigin); if err!=nil { return Site{},err }
@@ -118,7 +120,7 @@ func (s *Service) SubmitURL(ctx context.Context,userID,siteID int64,raw,operatio
 	site,err:=s.Store.OwnedSite(ctx,userID,siteID,true); if err!=nil { return 0,err }
 	target,err:=s.Validator.Validate(ctx,raw); if err!=nil || !sameSiteHost(target.Host,site.Host) { return 0,ErrInvalidSiteOrigin }
 	normalized,err:=urlnorm.Normalize(raw); if err!=nil { return 0,err }
-	return s.Store.SubmitURLRequest(ctx,userID,siteID,normalized,operation)
+	return s.Store.QueueURLRequest(ctx,userID,siteID,normalized,operation)
 }
 
 func (s *Service) URLStatus(ctx context.Context,userID,siteID int64,raw string)(URLStatus,error){
