@@ -45,8 +45,10 @@ services:
       - .env
     environment:
       MAP_ARTIFACT_ROOT: /maps
+      ORG_IMPORT_ROOT: /imports
     volumes:
       - ./data/maps:/maps:ro
+      - ./data/imports:/imports:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,6 +84,22 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     command: ["webmaster-worker"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 384m
+    cpus: 0.75
+
+  organizations-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["organizations-worker"]
     restart: unless-stopped
     env_file:
       - .env
