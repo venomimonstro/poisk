@@ -32,13 +32,13 @@ WHERE batch_id=$1 AND mode='APPLY' AND status='APPLYING' AND worker_id=$2 AND le
 	err=tx.QueryRow(ctx,`SELECT p.plan_id,p.action,p.target_place_id,
  s.staging_id,s.source_key,s.source_record_id,s.source_row_number,COALESCE(s.raw_payload->>'name',''),COALESCE(s.normalized_name,''),
  COALESCE(s.normalized_phone,''),COALESCE(s.normalized_website,''),COALESCE(s.raw_payload->>'address',''),COALESCE(s.normalized_address,''),
- COALESCE(s.category_key,''),s.latitude,s.longitude,s.payload_hash,s.state
+ COALESCE(s.city_key,''),COALESCE(s.category_key,''),s.latitude,s.longitude,s.payload_hash,s.state
 FROM organization_import_plans p JOIN organization_staging_rows s ON s.staging_id=p.staging_id
 WHERE p.batch_id=$1 AND p.plan_id>$2 AND p.applied_at IS NULL AND p.action IN ('CREATE','UPDATE','NOOP')
 ORDER BY p.plan_id LIMIT 1 FOR UPDATE OF p,s`,batchID,checkpoint).Scan(
 		&item.PlanID,&item.Action,&item.TargetPlaceID,&item.Staged.ID,&item.Staged.SourceKey,&item.Staged.SourceRecordID,&item.Staged.RowNumber,
 		&item.Staged.Name,&item.Staged.NormalizedName,&item.Staged.Phone,&item.Staged.Website,&item.Staged.Address,&item.Staged.NormalizedAddress,
-		&item.Staged.CategoryKey,&item.Staged.Latitude,&item.Staged.Longitude,&item.Staged.PayloadHash,&item.Staged.State)
+		&item.Staged.CityKey,&item.Staged.CategoryKey,&item.Staged.Latitude,&item.Staged.Longitude,&item.Staged.PayloadHash,&item.Staged.State)
 	if errors.Is(err,pgx.ErrNoRows){
 		var unresolved int
 		if err:=tx.QueryRow(ctx,`SELECT count(*) FROM organization_import_plans WHERE batch_id=$1 AND action='REVIEW'`,batchID).Scan(&unresolved);err!=nil{return false,err}
@@ -51,6 +51,8 @@ WHERE batch_id=$1 AND worker_id=$2 AND status='APPLYING'`,batchID,workerID)
 		return true,nil
 	}
 	if err!=nil{return false,err}
+	item.Staged.Name=compactText(item.Staged.Name)
+	item.Staged.Address=compactText(item.Staged.Address)
 
 	lockKey:=item.Staged.SourceKey+"\x00"+item.Staged.SourceRecordID
 	if _,err=tx.Exec(ctx,`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,lockKey);err!=nil{return false,err}
@@ -108,9 +110,9 @@ func applyCreate(ctx context.Context,tx pgx.Tx,item applyRow)(int64,int64,error)
 	}
 	if !errors.Is(err,pgx.ErrNoRows){return 0,0,err}
 	var placeID,version int64
-	err=tx.QueryRow(ctx,`INSERT INTO organizations(name,normalized_name,category_key,phone,website,address,normalized_address,latitude,longitude,source_count)
-VALUES($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),$8,$9,1)
-RETURNING place_id,version`,item.Staged.Name,item.Staged.NormalizedName,item.Staged.CategoryKey,item.Staged.Phone,item.Staged.Website,item.Staged.Address,item.Staged.NormalizedAddress,item.Staged.Latitude,item.Staged.Longitude).Scan(&placeID,&version)
+	err=tx.QueryRow(ctx,`INSERT INTO organizations(name,normalized_name,city_key,category_key,phone,website,address,normalized_address,latitude,longitude,source_count)
+VALUES($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,$10,1)
+RETURNING place_id,version`,item.Staged.Name,item.Staged.NormalizedName,item.Staged.CityKey,item.Staged.CategoryKey,item.Staged.Phone,item.Staged.Website,item.Staged.Address,item.Staged.NormalizedAddress,item.Staged.Latitude,item.Staged.Longitude).Scan(&placeID,&version)
 	if err!=nil{return 0,0,err}
 	_,err=tx.Exec(ctx,`INSERT INTO organization_source_links(source_key,source_record_id,place_id,source_payload_hash)
 VALUES($1,$2,$3,$4)`,item.Staged.SourceKey,item.Staged.SourceRecordID,placeID,item.Staged.PayloadHash)
@@ -143,16 +145,16 @@ WHERE source_key=$1 AND source_record_id=$2`,item.Staged.SourceKey,item.Staged.S
 
 	var version int64
 	if linked&&sourceCount<=1{
-		err:=tx.QueryRow(ctx,`UPDATE organizations SET version=version+1,name=$2,normalized_name=$3,category_key=NULLIF($4,''),
- phone=NULLIF($5,''),website=NULLIF($6,''),address=NULLIF($7,''),normalized_address=NULLIF($8,''),latitude=$9,longitude=$10,
- source_count=$11,updated_at=now() WHERE place_id=$1 RETURNING version`,targetPlaceID,item.Staged.Name,item.Staged.NormalizedName,item.Staged.CategoryKey,item.Staged.Phone,item.Staged.Website,item.Staged.Address,item.Staged.NormalizedAddress,item.Staged.Latitude,item.Staged.Longitude,sourceCount).Scan(&version)
+		err:=tx.QueryRow(ctx,`UPDATE organizations SET version=version+1,name=$2,normalized_name=$3,city_key=NULLIF($4,''),category_key=NULLIF($5,''),
+ phone=NULLIF($6,''),website=NULLIF($7,''),address=NULLIF($8,''),normalized_address=NULLIF($9,''),latitude=$10,longitude=$11,
+ source_count=$12,updated_at=now() WHERE place_id=$1 RETURNING version`,targetPlaceID,item.Staged.Name,item.Staged.NormalizedName,item.Staged.CityKey,item.Staged.CategoryKey,item.Staged.Phone,item.Staged.Website,item.Staged.Address,item.Staged.NormalizedAddress,item.Staged.Latitude,item.Staged.Longitude,sourceCount).Scan(&version)
 		if err!=nil{return 0,0,err}
 	}else{
 		err:=tx.QueryRow(ctx,`UPDATE organizations SET version=version+1,
- category_key=COALESCE(category_key,NULLIF($2,'')),phone=COALESCE(phone,NULLIF($3,'')),website=COALESCE(website,NULLIF($4,'')),
- address=COALESCE(address,NULLIF($5,'')),normalized_address=COALESCE(normalized_address,NULLIF($6,'')),
- latitude=COALESCE(latitude,$7),longitude=COALESCE(longitude,$8),source_count=$9,updated_at=now()
-WHERE place_id=$1 RETURNING version`,targetPlaceID,item.Staged.CategoryKey,item.Staged.Phone,item.Staged.Website,item.Staged.Address,item.Staged.NormalizedAddress,item.Staged.Latitude,item.Staged.Longitude,sourceCount).Scan(&version)
+ city_key=COALESCE(city_key,NULLIF($2,'')),category_key=COALESCE(category_key,NULLIF($3,'')),phone=COALESCE(phone,NULLIF($4,'')),website=COALESCE(website,NULLIF($5,'')),
+ address=COALESCE(address,NULLIF($6,'')),normalized_address=COALESCE(normalized_address,NULLIF($7,'')),
+ latitude=COALESCE(latitude,$8),longitude=COALESCE(longitude,$9),source_count=$10,updated_at=now()
+WHERE place_id=$1 RETURNING version`,targetPlaceID,item.Staged.CityKey,item.Staged.CategoryKey,item.Staged.Phone,item.Staged.Website,item.Staged.Address,item.Staged.NormalizedAddress,item.Staged.Latitude,item.Staged.Longitude,sourceCount).Scan(&version)
 		if err!=nil{return 0,0,err}
 	}
 	return targetPlaceID,version,nil
