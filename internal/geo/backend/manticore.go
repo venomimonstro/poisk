@@ -39,6 +39,10 @@ type Query struct {
 	Latitude *float64
 	Longitude *float64
 	RadiusMeters int
+	MinLatitude *float64
+	MinLongitude *float64
+	MaxLatitude *float64
+	MaxLongitude *float64
 	Limit int
 }
 
@@ -82,6 +86,13 @@ func (c *Client) Search(ctx context.Context,q Query)(Result,error){
 		must=append(must,map[string]any{"equals":map[string]any{"has_location":1}},map[string]any{"geo_distance":map[string]any{
 			"distance_type":"adaptive","location_anchor":map[string]any{"lat":*q.Latitude,"lon":*q.Longitude},"location_source":"latitude,longitude","distance":fmt.Sprintf("%d m",radius),
 		}})
+	}
+	if q.MinLatitude!=nil&&q.MinLongitude!=nil&&q.MaxLatitude!=nil&&q.MaxLongitude!=nil{
+		must=append(must,
+			map[string]any{"equals":map[string]any{"has_location":1}},
+			map[string]any{"range":map[string]any{"latitude":map[string]any{"gte":*q.MinLatitude,"lte":*q.MaxLatitude}}},
+			map[string]any{"range":map[string]any{"longitude":map[string]any{"gte":*q.MinLongitude,"lte":*q.MaxLongitude}}},
+		)
 	}
 	payload:=map[string]any{
 		"table":"organizations","query":map[string]any{"bool":map[string]any{"must":must}},"limit":limit,
