@@ -35,8 +35,8 @@ func TestVerifyFileRequiresExactBody(t *testing.T){
 	if err:=v.Verify(context.Background(),Site{Host:"example.com",Origin:"https://example.com"},VerificationFile,"secret"); err!=nil { t.Fatal(err) }
 }
 
-func TestVerifyMetaParsesAttributeOrderAndEscaping(t *testing.T){
-	body:=[]byte(`<html><head><meta content="secret" data-x="1" name="poisk-verification"></head></html>`)
+func TestVerifyMetaParsesAttributeOrder(t *testing.T){
+	body:=[]byte("<html><head><meta content=\"secret\" data-x=\"1\" name=\"poisk-verification\"></head></html>")
 	f:=&fakeProofFetcher{result:fetcher.Result{StatusCode:http.StatusOK,FinalURL:"https://example.com/",Body:body}}
 	v:=Verifier{Fetcher:f}
 	if err:=v.Verify(context.Background(),Site{Host:"example.com",Origin:"https://example.com"},VerificationMeta,"secret"); err!=nil { t.Fatal(err) }
