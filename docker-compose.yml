@@ -149,6 +149,26 @@ services:
     mem_limit: 384m
     cpus: 0.75
 
+  resource-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["resource-monitor"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      RESOURCE_DISK_PATH: /data-watch
+    volumes:
+      - ./:/data-watch:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 96m
+    cpus: 0.20
+
   frontend:
     build:
       context: .
@@ -180,6 +200,46 @@ services:
       - no-new-privileges:true
     mem_limit: 128m
     cpus: 0.5
+
+  backup:
+    image: postgres:18-bookworm
+    profiles: ["ops"]
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      BACKUP_ROOT: /backups
+    command: ["sh", "/ops/backup.sh"]
+    volumes:
+      - ./deploy/backup:/ops:ro
+      - ./data/backups:/backups
+      - ./docker-compose.yml:/safe-config/docker-compose.yml:ro
+      - ./deploy/nginx/default.conf:/safe-config/default.conf:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+  restore:
+    image: postgres:18-bookworm
+    profiles: ["ops"]
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      RESTORE_DIR: ${RESTORE_DIR:-}
+      RESTORE_CONFIRM: ${RESTORE_CONFIRM:-}
+      RESTORE_ALLOW_NONEMPTY: ${RESTORE_ALLOW_NONEMPTY:-no}
+    command: ["sh", "/ops/restore.sh"]
+    volumes:
+      - ./deploy/backup:/ops:ro
+      - ./data/backups:/backups:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   postgres_data:
