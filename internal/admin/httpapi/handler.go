@@ -28,6 +28,7 @@ func (h Handler) Routes()http.Handler{
 	r.Group(func(protected chi.Router){
 		protected.Use(h.requireSession)
 		protected.Get("/me",h.Me)
+		protected.Get("/csrf",h.RotateCSRF)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","SUPPORT")).Get("/status",h.Status)
 		protected.With(h.requireCSRF).Post("/logout",h.Logout)
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/domains/preview",h.DomainPreview)
