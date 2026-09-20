@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/venomimonstro/poisk/internal/admin"
 	adminhttp "github.com/venomimonstro/poisk/internal/admin/httpapi"
 	"github.com/venomimonstro/poisk/internal/platform/guard"
 )
@@ -16,11 +17,11 @@ func registerAdminRoutes(router chi.Router,apiGuard guard.Middleware,pool *pgxpo
 	service,err:=newAdminService(pool)
 	if err!=nil{
 		slog.Warn("admin API disabled; fail-closed", "reason", err.Error())
-		handler:=adminhttp.Handler{Service:nil,SecureCookies:secureCookies}
+		handler:=adminhttp.Handler{Service:nil,Ops:nil,SecureCookies:secureCookies}
 		router.Mount("/api/admin",apiGuard.Protect(handler.Routes()))
 		return nil
 	}
-	handler:=adminhttp.Handler{Service:service,SecureCookies:secureCookies}
+	handler:=adminhttp.Handler{Service:service,Ops:admin.OpsRepository{DB:pool},SecureCookies:secureCookies}
 	router.Mount("/api/admin",apiGuard.Protect(handler.Routes()))
 	return nil
 }
