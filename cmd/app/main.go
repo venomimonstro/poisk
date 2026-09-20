@@ -24,6 +24,7 @@ import (
 	"github.com/venomimonstro/poisk/internal/indexer/outbox"
 	"github.com/venomimonstro/poisk/internal/indexer/source"
 	indexworker "github.com/venomimonstro/poisk/internal/indexer/worker"
+	maphttp "github.com/venomimonstro/poisk/internal/maps/httpapi"
 	"github.com/venomimonstro/poisk/internal/platform/config"
 	"github.com/venomimonstro/poisk/internal/platform/guard"
 	"github.com/venomimonstro/poisk/internal/platform/health"
@@ -66,6 +67,8 @@ func run() error {
 		return runIndexer(cfg, pool)
 	case "webmaster-worker":
 		return runWebmasterWorker(pool)
+	case "mapctl":
+		return runMapCtl(ctx, pool, os.Args[2:])
 	case "quality":
 		return runQuality(cfg)
 	default:
@@ -83,6 +86,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	answerService := &answersvc.Service{Search: searchService, MinConfidence: answersvc.DefaultMinConfidence}
 	answerHandler := answerhttp.Handler{AnswerService: answerService, Citations: webmasterRepo}
 	trackingHandler := webmasterhttp.TrackingHandler{Recorder: webmasterRepo}
+	mapHandler := maphttp.Handler{Maps: newMapService(pool)}
 
 	validator := crawlersecurity.NewValidator()
 	proofCfg := crawlerfetcher.DefaultConfig()
@@ -111,6 +115,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	router.Get("/health/perf", perfHandler(latencyRecorder))
 	router.With(apiGuard.Protect).Get("/api/search", searchHandler.Search)
 	router.With(apiGuard.Protect).Get("/api/answer", answerHandler.Answer)
+	router.With(apiGuard.Protect).Get("/api/map/config", mapHandler.Config)
 	router.With(apiGuard.Protect).Post("/api/click", trackingHandler.Click)
 	router.Mount("/api/webmaster", apiGuard.Protect(webmasterHandler.Routes()))
 
