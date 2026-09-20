@@ -21,19 +21,19 @@ var (
 )
 
 type Manifest struct {
-	Version         string    `json:"version"`
-	PMTilesPath     string    `json:"pmtiles_path"`
-	StylePath       string    `json:"style_path"`
-	PMTilesSHA256   string    `json:"pmtiles_sha256"`
-	StyleSHA256     string    `json:"style_sha256"`
-	PMTilesSize     int64     `json:"pmtiles_size"`
-	StyleSize       int64     `json:"style_size"`
+	Version         string     `json:"version"`
+	PMTilesPath     string     `json:"pmtiles_path"`
+	StylePath       string     `json:"style_path"`
+	PMTilesSHA256   string     `json:"pmtiles_sha256"`
+	StyleSHA256     string     `json:"style_sha256"`
+	PMTilesSize     int64      `json:"pmtiles_size"`
+	StyleSize       int64      `json:"style_size"`
 	Bounds          [4]float64 `json:"bounds"`
-	MinZoom         int       `json:"min_zoom"`
-	MaxZoom         int       `json:"max_zoom"`
+	MinZoom         int        `json:"min_zoom"`
+	MaxZoom         int        `json:"max_zoom"`
 	Center          [3]float64 `json:"center"`
-	SourceName      string    `json:"source_name"`
-	AttributionHTML string    `json:"attribution_html"`
+	SourceName      string     `json:"source_name"`
+	AttributionHTML string     `json:"attribution_html"`
 }
 
 func (m Manifest) Validate() error {
@@ -55,8 +55,19 @@ func ValidateFiles(root string,m Manifest) error {
 	stylePath,err:=resolveUnderRoot(root,m.StylePath);if err!=nil{return err}
 	if err:=verifyFile(pmPath,m.PMTilesSize,m.PMTilesSHA256,0);err!=nil{return fmt.Errorf("pmtiles artifact: %w",err)}
 	if err:=verifyFile(stylePath,m.StyleSize,m.StyleSHA256,maxStyleBytes);err!=nil{return fmt.Errorf("map style: %w",err)}
-	if err:=validateStyleFile(stylePath);err!=nil{return err}
+	if err:=validateStyleFile(stylePath,m);err!=nil{return err}
 	return nil
+}
+
+func RuntimeFilesPresent(root string,m Manifest) error {
+	if err:=m.Validate();err!=nil{return err}
+	for _,item:=range []struct{path string;size int64}{{m.PMTilesPath,m.PMTilesSize},{m.StylePath,m.StyleSize}}{
+		full,err:=resolveUnderRoot(root,item.path);if err!=nil{return err}
+		info,err:=os.Stat(full);if err!=nil{return err}
+		if !info.Mode().IsRegular() || info.Size()!=item.size{return ErrInvalidManifest}
+	}
+	stylePath,err:=resolveUnderRoot(root,m.StylePath);if err!=nil{return err}
+	return validateStyleFile(stylePath,m)
 }
 
 func safeRelativePath(path,suffix string) bool {
@@ -71,7 +82,7 @@ func validSHA(value string) bool {
 }
 
 func resolveUnderRoot(root,relative string)(string,error){
-	if strings.TrimSpace(root)=="" || !safeRelativePath(relative,filepath.Ext(relative)){return "",ErrInvalidManifest}
+	if strings.TrimSpace(root)=="" || relative=="" || filepath.IsAbs(relative) || strings.Contains(relative,"\\") || strings.Contains(relative,".."){return "",ErrInvalidManifest}
 	rootAbs,err:=filepath.Abs(root);if err!=nil{return "",err}
 	full,err:=filepath.Abs(filepath.Join(rootAbs,filepath.FromSlash(relative)));if err!=nil{return "",err}
 	rel,err:=filepath.Rel(rootAbs,full);if err!=nil || rel==".." || strings.HasPrefix(rel,".."+string(filepath.Separator)){return "",ErrInvalidManifest}
@@ -87,18 +98,28 @@ func verifyFile(path string,wantSize int64,wantSHA string,maxSize int64)error{
 	return nil
 }
 
-func validateStyleFile(path string)error{
+func validateStyleFile(path string,m Manifest)error{
 	f,err:=os.Open(path);if err!=nil{return err};defer f.Close()
 	dec:=json.NewDecoder(io.LimitReader(f,maxStyleBytes+1))
 	var style map[string]any
 	if err:=dec.Decode(&style);err!=nil{return fmt.Errorf("decode map style: %w",err)}
+	var extra any;if err:=dec.Decode(&extra);err!=io.EOF{return ErrInvalidManifest}
 	if version,ok:=style["version"].(float64);!ok || version!=8{return ErrInvalidManifest}
+	if _,hasImports:=style["imports"];hasImports{return ErrInvalidManifest}
 	sources,ok:=style["sources"].(map[string]any);if !ok || len(sources)==0{return ErrInvalidManifest}
+	wanted:="pmtiles:///maps/"+m.PMTilesPath
+	bound:=false
 	for _,raw:=range sources{
 		source,ok:=raw.(map[string]any);if !ok{return ErrInvalidManifest}
-		if u,ok:=source["url"].(string);ok && strings.HasPrefix(strings.ToLower(strings.TrimSpace(u)),"http"){return ErrInvalidManifest}
-		if tiles,ok:=source["tiles"].([]any);ok{for _,tile:=range tiles{if s,ok:=tile.(string);ok && strings.HasPrefix(strings.ToLower(strings.TrimSpace(s)),"http"){return ErrInvalidManifest}}}
+		if u,ok:=source["url"].(string);ok{
+			u=strings.TrimSpace(u)
+			if u==wanted{bound=true;continue}
+			lower:=strings.ToLower(u)
+			if strings.HasPrefix(lower,"http://") || strings.HasPrefix(lower,"https://") || strings.HasPrefix(lower,"pmtiles://"){return ErrInvalidManifest}
+		}
+		if tiles,ok:=source["tiles"].([]any);ok{for _,tile:=range tiles{if s,ok:=tile.(string);ok{lower:=strings.ToLower(strings.TrimSpace(s));if strings.HasPrefix(lower,"http://")||strings.HasPrefix(lower,"https://"){return ErrInvalidManifest}}}}
 	}
-	for _,key:=range []string{"sprite","glyphs"}{if value,ok:=style[key].(string);ok && strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)),"http"){return ErrInvalidManifest}}
+	if !bound{return ErrInvalidManifest}
+	for _,key:=range []string{"sprite","glyphs"}{if value,ok:=style[key].(string);ok{lower:=strings.ToLower(strings.TrimSpace(value));if strings.HasPrefix(lower,"http://")||strings.HasPrefix(lower,"https://"){return ErrInvalidManifest}}}
 	return nil
 }
