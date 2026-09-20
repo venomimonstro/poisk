@@ -13,8 +13,6 @@ import (
 	"github.com/venomimonstro/poisk/internal/platform/guard"
 )
 
-type Resolver interface{ResolvePublic(rctx context.Context,key string)(widget.Config,error)}
-
 type Handler struct{
 	Widgets *widget.Repository
 	Search widget.Service
