@@ -43,6 +43,10 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      MAP_ARTIFACT_ROOT: /maps
+    volumes:
+      - ./data/maps:/maps:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,6 +119,7 @@ services:
       - "80:80"
     volumes:
       - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./data/maps:/maps:ro
     security_opt:
       - no-new-privileges:true
     mem_limit: 128m
