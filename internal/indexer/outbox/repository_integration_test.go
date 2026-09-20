@@ -22,7 +22,9 @@ func integrationDB(t *testing.T) *pgxpool.Pool {
 	if err != nil { t.Fatalf("create pool: %v", err) }
 	if err := pool.Ping(context.Background()); err != nil { pool.Close(); t.Fatalf("ping database: %v", err) }
 	t.Cleanup(pool.Close)
-	_, err = pool.Exec(context.Background(), `TRUNCATE TABLE index_outbox RESTART IDENTITY`)
+	_, err = pool.Exec(context.Background(), `TRUNCATE TABLE index_outbox RESTART IDENTITY;
+INSERT INTO system_settings(key,value,updated_at) VALUES('resource_pressure','{"state":"NORMAL"}'::jsonb,now())
+ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`)
 	if err != nil { t.Fatalf("reset outbox: %v", err) }
 	return pool
 }
