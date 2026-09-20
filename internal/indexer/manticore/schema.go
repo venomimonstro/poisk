@@ -4,7 +4,7 @@ const (
 	WebIndex                   = "web_documents"
 	WebSchemaVersion           = 2
 	OrganizationsIndex         = "organizations"
-	OrganizationsSchemaVersion = 1
+	OrganizationsSchemaVersion = 2
 )
 
 const WebSchemaSQL = `CREATE TABLE IF NOT EXISTS web_documents (
