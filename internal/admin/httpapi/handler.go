@@ -17,14 +17,20 @@ type contextKey string
 const sessionKey contextKey="admin_session"
 const sessionCookie="poisk_admin_session"
 
-type Handler struct{Service *admin.Service;SecureCookies bool}
+type OpsReader interface{Snapshot(context.Context)(admin.OpsSnapshot,error)}
+type Handler struct{Service *admin.Service;Ops OpsReader;SecureCookies bool}
 
 type loginRequest struct{Email string `json:"email"`;Password string `json:"password"`;SecondFactor string `json:"second_factor"`}
 
 func (h Handler) Routes()http.Handler{
 	r:=chi.NewRouter()
 	r.Post("/login",h.Login)
-	r.Group(func(protected chi.Router){protected.Use(h.requireSession);protected.Get("/me",h.Me);protected.With(h.requireCSRF).Post("/logout",h.Logout)})
+	r.Group(func(protected chi.Router){
+		protected.Use(h.requireSession)
+		protected.Get("/me",h.Me)
+		protected.With(h.RequireRoles("OPERATOR","ANALYST","SUPPORT")).Get("/status",h.Status)
+		protected.With(h.requireCSRF).Post("/logout",h.Logout)
+	})
 	return r
 }
 
@@ -37,6 +43,7 @@ func (h Handler) Login(w http.ResponseWriter,r *http.Request){
 }
 
 func (h Handler) Me(w http.ResponseWriter,r *http.Request){session,ok:=SessionFromContext(r.Context());if !ok{writeError(w,http.StatusUnauthorized,"unauthorized");return};writeJSON(w,http.StatusOK,map[string]any{"admin_id":session.AdminID,"email":session.Email,"role":session.Role,"expires_at":session.ExpiresAt})}
+func (h Handler) Status(w http.ResponseWriter,r *http.Request){if h.Ops==nil{writeError(w,http.StatusServiceUnavailable,"ops_unavailable");return};snapshot,err:=h.Ops.Snapshot(r.Context());if err!=nil{writeError(w,http.StatusServiceUnavailable,"ops_unavailable");return};writeJSON(w,http.StatusOK,snapshot)}
 func (h Handler) Logout(w http.ResponseWriter,r *http.Request){session,ok:=SessionFromContext(r.Context());if !ok{writeError(w,http.StatusUnauthorized,"unauthorized");return};if err:=h.Service.Logout(r.Context(),session);err!=nil{writeError(w,http.StatusServiceUnavailable,"logout_failed");return};h.clearSessionCookie(w);writeJSON(w,http.StatusOK,map[string]bool{"ok":true})}
 
 func (h Handler) requireSession(next http.Handler)http.Handler{return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){if h.Service==nil{writeError(w,http.StatusServiceUnavailable,"admin_unavailable");return};cookie,err:=r.Cookie(sessionCookie);if err!=nil||strings.TrimSpace(cookie.Value)==""{writeError(w,http.StatusUnauthorized,"unauthorized");return};session,err:=h.Service.Authenticate(r.Context(),cookie.Value);if err!=nil{h.clearSessionCookie(w);writeError(w,http.StatusUnauthorized,"unauthorized");return};next.ServeHTTP(w,r.WithContext(context.WithValue(r.Context(),sessionKey,session)))})}
