@@ -1,10 +1,10 @@
 # CURRENT SPRINT
 
-**Sprint:** 10 — Performance / Load Protection
+**Sprint:** 11 — Webmaster Free
 **Status:** IN_PROGRESS
 
 ## Goal
-Защитить Search/Answer API от перегрузки и дорогих запросов: end-to-end deadlines, bounded concurrency, single-flight для одинаковых запросов, rate limiting, load shedding, query complexity limits и измеримые latency/load primitives без новых инфраструктурных сервисов.
+Собрать бесплатный Webmaster-контур, который позволяет владельцу сайта зарегистрироваться, подтвердить владение доменом, добавить sitemap/URL, запросить удаление или переиндексацию, видеть индексный статус и базовую диагностику, а также получать агрегированные показы/клики/Answer citations.
 
 ## Depends On
 - Sprint 00 — PASS
@@ -17,37 +17,43 @@
 - Sprint 07 — PASS
 - Sprint 08 — PASS
 - Sprint 09 — PASS (code/static gate)
+- Sprint 10 — PASS (code/static gate)
 
 ## Allowed Work
-- API request deadlines
-- bounded concurrency semaphores
-- local token-bucket/rate limiting
-- single-flight/coalescing for identical searches
-- query complexity scoring/limits
-- load shedding and 429/503 behavior
-- latency instrumentation primitives
-- cache hardening
-- bounded benchmarks/tests
-- progressive Search/Answer frontend behavior
+- local account/session authentication for Webmaster
+- password hashing and session lifecycle
+- site registration and canonical host validation
+- ownership verification tokens
+- DNS TXT / HTML file / meta-tag verification contracts
+- sitemap submission
+- URL submit/reindex/delete requests
+- index status and crawl diagnostics
+- aggregate impressions/clicks/CTR
+- Answer citation counters
+- Webmaster API and basic UI
+- audit events for sensitive Webmaster actions
+- bounded validation/rate limits using existing platform primitives
 
 ## Forbidden Work
+- paid Webmaster/Agency billing
+- Maps/GEO/organizations
 - Redis/Kafka/RabbitMQ
-- distributed rate-limit infrastructure
-- Kubernetes/microservices
-- LLM on every query
-- GEO/maps/organizations
-- vector DB/embeddings
+- external identity provider dependency required for core login
+- arbitrary remote file fetching that bypasses crawler SSRF policy
+- ranking manipulation controls sold to webmasters
+- GitHub Actions/CI
 
 ## Definition of Done
-- [ ] Search and Answer have explicit request deadlines
-- [ ] concurrent backend searches are globally bounded
-- [ ] identical concurrent Search requests are coalesced
-- [ ] per-client API rate limit is bounded in memory
-- [ ] rate limiter has bounded client-state cardinality/eviction
-- [ ] query complexity guard rejects pathological input before backend
-- [ ] overload returns deterministic 429 or 503 instead of queue explosion
-- [ ] local cache remains bounded under many unique queries
-- [ ] latency counters/histogram primitives available for P50/P95/P99 reporting
-- [ ] tests cover deadline, rate, overload, single-flight and complexity limits
+- [ ] user can register/login/logout with bounded sessions
+- [ ] passwords are stored only as strong hashes
+- [ ] site can be added only as a canonical public HTTP(S) origin
+- [ ] ownership verification is replay-safe and auditable
+- [ ] verified owner can submit sitemap and individual URLs
+- [ ] verified owner can request reindex/delete without directly mutating Manticore
+- [ ] URL/index status and diagnostic reason are queryable
+- [ ] impressions/clicks/CTR aggregation contract exists
+- [ ] Answer citation aggregation contract exists
+- [ ] one user cannot access another user's sites
+- [ ] validation/security tests cover auth, ownership and cross-tenant isolation
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 10 report created
+- [ ] Sprint 11 report created
