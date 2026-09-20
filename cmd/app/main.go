@@ -69,6 +69,8 @@ func run() error {
 		return runWebmasterWorker(pool)
 	case "organizations-worker":
 		return runOrganizationsWorker(pool)
+	case "organization-indexer":
+		return runOrganizationIndexer(cfg, pool)
 	case "mapctl":
 		return runMapCtl(ctx, pool, os.Args[2:])
 	case "orgctl":
