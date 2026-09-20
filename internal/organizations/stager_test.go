@@ -1,7 +1,9 @@
 package organizations
 
 import (
+	"bufio"
 	"context"
+	"io"
 	"strings"
 	"testing"
 )
@@ -22,7 +24,6 @@ func TestStageJSONLMixesValidAndRejectedRows(t *testing.T){
 		`{"source_record_id":"2","name":""}`,
 		`not-json`,
 	},"\n")
-	// Convert escaped fixture quotes to actual JSON quotes.
 	input=strings.ReplaceAll(input,`\"`,`"`)
 	if err:=(Stager{Store:store}).StageJSONL(context.Background(),7,strings.NewReader(input));err!=nil{t.Fatal(err)}
 	if len(store.valid)!=1{t.Fatalf("valid=%d",len(store.valid))}
@@ -32,16 +33,16 @@ func TestStageJSONLMixesValidAndRejectedRows(t *testing.T){
 
 func TestStageJSONLRejectsOversizedRowWithoutUnboundedBuffering(t *testing.T){
 	store:=&stageStoreFake{}
-	input:=strings.Repeat("x",maxRawPayloadBytes+100)+"\n"+`{"source_record_id":"2","name":"После большой строки"}`
-	input=strings.ReplaceAll(input,`\"`,`"`)
+	valid:=`{"source_record_id":"2","name":"После большой строки"}`
+	valid=strings.ReplaceAll(valid,`\"`,`"`)
+	input:=strings.Repeat("x",maxRawPayloadBytes+100)+"\n"+valid
 	if err:=(Stager{Store:store}).StageJSONL(context.Background(),8,strings.NewReader(input));err!=nil{t.Fatal(err)}
 	if len(store.rejected)!=1||store.rejected[0]!="ROW_TOO_LARGE"{t.Fatalf("rejected=%v",store.rejected)}
 	if len(store.valid)!=1||store.valid[0].SourceRecordID!="2"{t.Fatalf("valid=%+v",store.valid)}
 }
 
 func TestReadBoundedLineHandlesFinalLineWithoutNewline(t *testing.T){
-	reader:=strings.NewReader("abc")
-	buffer:=newBoundedTestReader(reader)
+	buffer:=bufio.NewReader(strings.NewReader("abc"))
 	line,tooLarge,err:=readBoundedLine(buffer,10)
-	if string(line)!="abc"||tooLarge||err==nil{t.Fatalf("line=%q tooLarge=%v err=%v",line,tooLarge,err)}
+	if string(line)!="abc"||tooLarge||err!=io.EOF{t.Fatalf("line=%q tooLarge=%v err=%v",line,tooLarge,err)}
 }
