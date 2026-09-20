@@ -139,6 +139,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	if err:=registerGeoRoute(router,apiGuard,cfg);err!=nil{return err}
 	if err:=registerAddressRoutes(router,apiGuard,cfg,pool);err!=nil{return err}
 	if err:=registerAdminRoutes(router,apiGuard,pool);err!=nil{return err}
+	if err:=registerWidgetRoutes(router,apiGuard,cfg,pool);err!=nil{return err}
 
 	server := &http.Server{Addr:cfg.Addr,Handler:router,ReadHeaderTimeout:3*time.Second,ReadTimeout:5*time.Second,WriteTimeout:5*time.Second,IdleTimeout:60*time.Second}
 	serverErr := make(chan error, 1)
