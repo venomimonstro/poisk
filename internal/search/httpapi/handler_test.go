@@ -49,13 +49,15 @@ func TestHandlerRejectsInvalidLimit(t *testing.T) {
 	}
 }
 
-func TestHandlerMapsQueryAndBackendErrors(t *testing.T) {
+func TestHandlerMapsQueryBackendAndDeadlineErrors(t *testing.T) {
 	cases := []struct {
 		err  error
 		want int
 	}{
 		{querynorm.ErrEmptyQuery, http.StatusBadRequest},
 		{querynorm.ErrQueryTooLong, http.StatusBadRequest},
+		{querynorm.ErrQueryTooComplex, http.StatusBadRequest},
+		{context.DeadlineExceeded, http.StatusGatewayTimeout},
 		{errors.New("backend down"), http.StatusBadGateway},
 	}
 	for _, tc := range cases {
