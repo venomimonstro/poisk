@@ -1,0 +1,139 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useState } from "react";
+
+type AdminMe = { admin_id: number; email: string; role: string; expires_at: string };
+type Queue = { ready: number; leased: number; retry: number; dead: number };
+type Ops = {
+  crawl: Queue;
+  outbox: Array<Queue & { entity_type: string }>;
+  imports: { organizations_active: number; addresses_active: number; webmaster_sitemaps_active: number };
+  runtime: { goroutines: number; heap_alloc_bytes: number; heap_sys_bytes: number };
+  resources: { state: string; disk_used_pct: number; memory_used_pct: number; updated_at: string };
+};
+type Domain = { domain_id: number; host: string; status: string; policy: string; trust_level: number; quality_score: number; demand_score: number };
+type Preview = { preview_token: string; expires_at: string; host: string; before: { domain_id: number; status: string; policy: string }; after: { domain_id: number; status: string; policy: string } };
+
+const card: React.CSSProperties = { border: "1px solid #e2e2e2", borderRadius: 12, padding: 16, background: "#fff" };
+const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #ccc", borderRadius: 8, font: "inherit" };
+const button: React.CSSProperties = { padding: "10px 14px", border: 0, borderRadius: 8, cursor: "pointer", fontWeight: 700 };
+
+async function readJSON<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { ...init, cache: "no-store", credentials: "same-origin" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof data?.error === "string" ? data.error : `http_${response.status}`);
+  return data as T;
+}
+
+export default function AdminPage() {
+  const [me, setMe] = useState<AdminMe | null>(null);
+  const [csrf, setCSRF] = useState("");
+  const [ops, setOps] = useState<Ops | null>(null);
+  const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [factor, setFactor] = useState("");
+  const [query, setQuery] = useState("");
+  const [domains, setDomains] = useState<Domain[]>([]);
+  const [selected, setSelected] = useState<Domain | null>(null);
+  const [status, setStatus] = useState("ACTIVE");
+  const [policy, setPolicy] = useState("ALLOW");
+  const [preview, setPreview] = useState<Preview | null>(null);
+
+  const refresh = useCallback(async () => {
+    const current = await readJSON<AdminMe>("/api/admin/me");
+    const token = await readJSON<{ csrf_token: string }>("/api/admin/csrf");
+    const snapshot = await readJSON<Ops>("/api/admin/status");
+    setMe(current); setCSRF(token.csrf_token); setOps(snapshot); setError("");
+  }, []);
+
+  useEffect(() => { void refresh().catch(() => setMe(null)); }, [refresh]);
+
+  async function login(event: FormEvent) {
+    event.preventDefault(); setError("");
+    try {
+      const result = await readJSON<{ csrf_token: string; admin: { id: number; email: string; role: string }; expires_at: string }>("/api/admin/login", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password, second_factor: factor }),
+      });
+      setCSRF(result.csrf_token); setMe({ admin_id: result.admin.id, email: result.admin.email, role: result.admin.role, expires_at: result.expires_at });
+      setPassword(""); setFactor("");
+      setOps(await readJSON<Ops>("/api/admin/status"));
+    } catch (e) { setError(e instanceof Error ? e.message : "login_failed"); }
+  }
+
+  async function logout() {
+    try { await readJSON("/api/admin/logout", { method: "POST", headers: { "X-CSRF-Token": csrf } }); } catch { /* cookie is cleared on success only */ }
+    setMe(null); setCSRF(""); setOps(null); setDomains([]); setPreview(null);
+  }
+
+  async function searchDomains() {
+    try {
+      const result = await readJSON<{ results: Domain[] }>(`/api/admin/domains?q=${encodeURIComponent(query)}&limit=25`);
+      setDomains(result.results); setError("");
+    } catch (e) { setError(e instanceof Error ? e.message : "domains_unavailable"); }
+  }
+
+  async function makePreview() {
+    if (!selected) return;
+    try {
+      const result = await readJSON<Preview>("/api/admin/domains/preview", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify({ domain_id: selected.domain_id, status, policy }),
+      });
+      setPreview(result); setError("");
+    } catch (e) { setError(e instanceof Error ? e.message : "preview_failed"); }
+  }
+
+  async function applyPreview() {
+    if (!preview) return;
+    try {
+      await readJSON("/api/admin/domains/apply", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify({ preview_token: preview.preview_token }),
+      });
+      setPreview(null); setSelected(null); await searchDomains(); setOps(await readJSON<Ops>("/api/admin/status"));
+    } catch (e) { setError(e instanceof Error ? e.message : "apply_failed"); }
+  }
+
+  if (!me) return <main style={{ maxWidth: 440, margin: "80px auto", padding: 24 }}>
+    <h1>Poisk Admin</h1><p>Доступ только для созданных оператором администраторов с 2FA.</p>
+    <form onSubmit={login} style={{ ...card, display: "grid", gap: 12 }}>
+      <input style={input} type="email" autoComplete="username" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required />
+      <input style={input} type="password" autoComplete="current-password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} required />
+      <input style={input} inputMode="numeric" autoComplete="one-time-code" placeholder="TOTP или recovery code" value={factor} onChange={e => setFactor(e.target.value)} required />
+      <button style={{ ...button, background: "#111", color: "#fff" }} type="submit">Войти</button>
+      {error && <div role="alert">{error}</div>}
+    </form>
+  </main>;
+
+  const operator = me.role === "OPERATOR" || me.role === "SUPERADMIN";
+  return <main style={{ maxWidth: 1180, margin: "32px auto", padding: 24, display: "grid", gap: 18 }}>
+    <header style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
+      <div><h1 style={{ margin: 0 }}>Poisk Admin</h1><small>{me.email} · {me.role}</small></div>
+      <div style={{ display: "flex", gap: 8 }}><button style={button} onClick={() => void refresh()}>Обновить</button><button style={{ ...button, background: "#111", color: "white" }} onClick={() => void logout()}>Выйти</button></div>
+    </header>
+    {error && <div role="alert" style={{ ...card, borderColor: "#b00" }}>{error}</div>}
+    {ops && <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+      <div style={card}><strong>Resources</strong><div>State: {ops.resources.state}</div><div>Disk: {ops.resources.disk_used_pct.toFixed(1)}%</div><div>Memory: {ops.resources.memory_used_pct.toFixed(1)}%</div></div>
+      <div style={card}><strong>Crawler</strong><div>Ready {ops.crawl.ready} · Leased {ops.crawl.leased}</div><div>Retry {ops.crawl.retry} · Dead {ops.crawl.dead}</div></div>
+      <div style={card}><strong>Imports</strong><div>Organizations {ops.imports.organizations_active}</div><div>Addresses {ops.imports.addresses_active}</div><div>Sitemaps {ops.imports.webmaster_sitemaps_active}</div></div>
+      <div style={card}><strong>Runtime</strong><div>Goroutines {ops.runtime.goroutines}</div><div>Heap {(ops.runtime.heap_alloc_bytes / 1048576).toFixed(1)} MB</div></div>
+    </section>}
+    {ops?.outbox?.length ? <section style={card}><strong>Index outbox</strong>{ops.outbox.map(item => <div key={item.entity_type}>{item.entity_type}: ready {item.ready}, leased {item.leased}, retry {item.retry}, dead {item.dead}</div>)}</section> : null}
+    <section style={card}>
+      <h2>Domains</h2>
+      <div style={{ display: "flex", gap: 8 }}><input style={input} placeholder="host" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void searchDomains(); }} /><button style={button} onClick={() => void searchDomains()}>Найти</button></div>
+      <div style={{ display: "grid", gap: 6, marginTop: 12 }}>{domains.map(domain => <button key={domain.domain_id} style={{ ...button, textAlign: "left", background: selected?.domain_id === domain.domain_id ? "#ddd" : "#f4f4f4" }} onClick={() => { setSelected(domain); setStatus(domain.status); setPolicy(domain.policy); setPreview(null); }}>{domain.host} · {domain.status}/{domain.policy}</button>)}</div>
+    </section>
+    {selected && operator && <section style={card}>
+      <h2>Изменение политики: {selected.host}</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8 }}>
+        <select style={input} value={status} onChange={e => { setStatus(e.target.value); setPreview(null); }}><option>ACTIVE</option><option>PAUSED</option><option>DISABLED</option></select>
+        <select style={input} value={policy} onChange={e => { setPolicy(e.target.value); setPreview(null); }}><option>ALLOW</option><option>LIMITED</option><option>REVIEW</option><option>BLOCK</option></select>
+        <button style={button} onClick={() => void makePreview()}>Preview</button>
+      </div>
+      {preview && <div style={{ marginTop: 12, padding: 12, border: "1px solid #d99", borderRadius: 8 }}>
+        <div><strong>До:</strong> {preview.before.status}/{preview.before.policy}</div><div><strong>После:</strong> {preview.after.status}/{preview.after.policy}</div><div>Preview истекает: {new Date(preview.expires_at).toLocaleString()}</div>
+        <button style={{ ...button, marginTop: 10, background: "#8b0000", color: "white" }} onClick={() => void applyPreview()}>Подтвердить изменение</button>
+      </div>}
+    </section>}
+  </main>;
+}
