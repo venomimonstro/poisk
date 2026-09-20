@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -28,11 +29,18 @@ type RuntimeStats struct {
 	HeapAllocBytes uint64 `json:"heap_alloc_bytes"`
 	HeapSysBytes uint64 `json:"heap_sys_bytes"`
 }
+type ResourcePressure struct {
+	State string `json:"state"`
+	DiskUsedPct float64 `json:"disk_used_pct"`
+	MemoryUsedPct float64 `json:"memory_used_pct"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
 type OpsSnapshot struct {
 	Crawl QueueCounts `json:"crawl"`
 	Outbox []OutboxCounts `json:"outbox"`
 	Imports ImportCounts `json:"imports"`
 	Runtime RuntimeStats `json:"runtime"`
+	Resources ResourcePressure `json:"resources"`
 }
 
 type OpsRepository struct{DB *pgxpool.Pool}
@@ -46,6 +54,7 @@ func (o OpsRepository) Snapshot(ctx context.Context)(OpsSnapshot,error){
  (SELECT count(*) FROM organization_import_batches WHERE status IN ('STAGING','PLANNING','PLANNED','APPLYING')),
  (SELECT count(*) FROM address_import_batches WHERE status IN ('STAGING','RESOLVING','APPLYING')),
  (SELECT count(*) FROM webmaster_sitemaps WHERE status IN ('SUBMITTED','LEASED','RETRY'))`).Scan(&out.Imports.Organizations,&out.Imports.Addresses,&out.Imports.WebmasterSitemaps);err!=nil{return OpsSnapshot{},err}
+	if err:=o.DB.QueryRow(ctx,`SELECT COALESCE(value->>'state','UNKNOWN'),COALESCE((value->>'disk_used_pct')::double precision,0),COALESCE((value->>'memory_used_pct')::double precision,0),updated_at FROM system_settings WHERE key='resource_pressure'`).Scan(&out.Resources.State,&out.Resources.DiskUsedPct,&out.Resources.MemoryUsedPct,&out.Resources.UpdatedAt);err!=nil{return OpsSnapshot{},err}
 	var mem runtime.MemStats;runtime.ReadMemStats(&mem);out.Runtime=RuntimeStats{Goroutines:runtime.NumGoroutine(),HeapAllocBytes:mem.HeapAlloc,HeapSysBytes:mem.HeapSys}
 	return out,nil
 }
