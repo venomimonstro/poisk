@@ -2,22 +2,28 @@ package maps
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-const maxStyleBytes int64 = 2 << 20
+const (
+	maxStyleBytes int64 = 2 << 20
+	pmtilesHeaderSize   = 127
+	pmtilesRootWindow   = 16 << 10
+)
 
 var (
 	ErrInvalidManifest = errors.New("invalid map manifest")
-	versionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	versionPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 )
 
 type Manifest struct {
@@ -40,7 +46,7 @@ func (m Manifest) Validate() error {
 	if !versionPattern.MatchString(m.Version) { return ErrInvalidManifest }
 	if !safeRelativePath(m.PMTilesPath,".pmtiles") || !safeRelativePath(m.StylePath,".json") { return ErrInvalidManifest }
 	if !validSHA(m.PMTilesSHA256) || !validSHA(m.StyleSHA256) { return ErrInvalidManifest }
-	if m.PMTilesSize<=0 || m.StyleSize<=0 || m.StyleSize>maxStyleBytes { return ErrInvalidManifest }
+	if m.PMTilesSize < pmtilesHeaderSize || m.StyleSize<=0 || m.StyleSize>maxStyleBytes { return ErrInvalidManifest }
 	if m.Bounds[0] < -180 || m.Bounds[0] >= m.Bounds[2] || m.Bounds[2] > 180 { return ErrInvalidManifest }
 	if m.Bounds[1] < -90 || m.Bounds[1] >= m.Bounds[3] || m.Bounds[3] > 90 { return ErrInvalidManifest }
 	if m.MinZoom<0 || m.MaxZoom>24 || m.MinZoom>m.MaxZoom { return ErrInvalidManifest }
@@ -54,6 +60,7 @@ func ValidateFiles(root string,m Manifest) error {
 	pmPath,err:=resolveUnderRoot(root,m.PMTilesPath);if err!=nil{return err}
 	stylePath,err:=resolveUnderRoot(root,m.StylePath);if err!=nil{return err}
 	if err:=verifyFile(pmPath,m.PMTilesSize,m.PMTilesSHA256,0);err!=nil{return fmt.Errorf("pmtiles artifact: %w",err)}
+	if err:=validatePMTilesHeader(pmPath,m);err!=nil{return fmt.Errorf("pmtiles header: %w",err)}
 	if err:=verifyFile(stylePath,m.StyleSize,m.StyleSHA256,maxStyleBytes);err!=nil{return fmt.Errorf("map style: %w",err)}
 	if err:=validateStyleFile(stylePath,m);err!=nil{return err}
 	return nil
@@ -66,6 +73,8 @@ func RuntimeFilesPresent(root string,m Manifest) error {
 		info,err:=os.Stat(full);if err!=nil{return err}
 		if !info.Mode().IsRegular() || info.Size()!=item.size{return ErrInvalidManifest}
 	}
+	pmPath,err:=resolveUnderRoot(root,m.PMTilesPath);if err!=nil{return err}
+	if err:=validatePMTilesHeader(pmPath,m);err!=nil{return err}
 	stylePath,err:=resolveUnderRoot(root,m.StylePath);if err!=nil{return err}
 	return validateStyleFile(stylePath,m)
 }
@@ -98,6 +107,37 @@ func verifyFile(path string,wantSize int64,wantSHA string,maxSize int64)error{
 	return nil
 }
 
+func validatePMTilesHeader(path string,m Manifest)error{
+	f,err:=os.Open(path);if err!=nil{return err};defer f.Close()
+	header:=make([]byte,pmtilesHeaderSize)
+	if _,err:=io.ReadFull(f,header);err!=nil{return ErrInvalidManifest}
+	if string(header[:7])!="PMTiles" || header[7]!=3{return ErrInvalidManifest}
+	if header[99]!=1 && header[99]!=6{return ErrInvalidManifest}
+	if int(header[100])!=m.MinZoom || int(header[101])!=m.MaxZoom{return ErrInvalidManifest}
+
+	bounds:=[4]float64{
+		float64(int32(binary.LittleEndian.Uint32(header[102:106])))/1e7,
+		float64(int32(binary.LittleEndian.Uint32(header[106:110])))/1e7,
+		float64(int32(binary.LittleEndian.Uint32(header[110:114])))/1e7,
+		float64(int32(binary.LittleEndian.Uint32(header[114:118])))/1e7,
+	}
+	for i:=range bounds{if math.Abs(bounds[i]-m.Bounds[i])>1e-7{return ErrInvalidManifest}}
+
+	rootOffset:=binary.LittleEndian.Uint64(header[8:16])
+	rootLength:=binary.LittleEndian.Uint64(header[16:24])
+	tileOffset:=binary.LittleEndian.Uint64(header[56:64])
+	tileLength:=binary.LittleEndian.Uint64(header[64:72])
+	if rootOffset<pmtilesHeaderSize || rootLength==0 || rootOffset+rootLength<rootOffset || rootOffset+rootLength>pmtilesRootWindow{return ErrInvalidManifest}
+	if !rangeInside(uint64(m.PMTilesSize),rootOffset,rootLength) || !rangeInside(uint64(m.PMTilesSize),tileOffset,tileLength){return ErrInvalidManifest}
+	return nil
+}
+
+func rangeInside(size,offset,length uint64)bool{
+	if length==0 || offset>size{return false}
+	end:=offset+length
+	return end>=offset && end<=size
+}
+
 func validateStyleFile(path string,m Manifest)error{
 	f,err:=os.Open(path);if err!=nil{return err};defer f.Close()
 	dec:=json.NewDecoder(io.LimitReader(f,maxStyleBytes+1))
@@ -108,18 +148,20 @@ func validateStyleFile(path string,m Manifest)error{
 	if _,hasImports:=style["imports"];hasImports{return ErrInvalidManifest}
 	sources,ok:=style["sources"].(map[string]any);if !ok || len(sources)==0{return ErrInvalidManifest}
 	wanted:="pmtiles:///maps/"+m.PMTilesPath
-	bound:=false
+	boundSource,ok:=sources[m.SourceName].(map[string]any);if !ok{return ErrInvalidManifest}
+	if sourceType,ok:=boundSource["type"].(string);!ok || sourceType!="vector"{return ErrInvalidManifest}
+	if u,ok:=boundSource["url"].(string);!ok || strings.TrimSpace(u)!=wanted{return ErrInvalidManifest}
+
 	for _,raw:=range sources{
 		source,ok:=raw.(map[string]any);if !ok{return ErrInvalidManifest}
 		if u,ok:=source["url"].(string);ok{
 			u=strings.TrimSpace(u)
-			if u==wanted{bound=true;continue}
+			if u==wanted{continue}
 			lower:=strings.ToLower(u)
 			if strings.HasPrefix(lower,"http://") || strings.HasPrefix(lower,"https://") || strings.HasPrefix(lower,"pmtiles://"){return ErrInvalidManifest}
 		}
 		if tiles,ok:=source["tiles"].([]any);ok{for _,tile:=range tiles{if s,ok:=tile.(string);ok{lower:=strings.ToLower(strings.TrimSpace(s));if strings.HasPrefix(lower,"http://")||strings.HasPrefix(lower,"https://"){return ErrInvalidManifest}}}}
 	}
-	if !bound{return ErrInvalidManifest}
 	for _,key:=range []string{"sprite","glyphs"}{if value,ok:=style[key].(string);ok{lower:=strings.ToLower(strings.TrimSpace(value));if strings.HasPrefix(lower,"http://")||strings.HasPrefix(lower,"https://"){return ErrInvalidManifest}}}
 	return nil
 }
