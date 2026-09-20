@@ -37,6 +37,7 @@ services:
       start_period: 10s
 
   backend:
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
     build:
       context: .
       dockerfile: Dockerfile.backend
@@ -64,6 +65,7 @@ services:
     cpus: 1.5
 
   indexer:
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
     build:
       context: .
       dockerfile: Dockerfile.backend
@@ -82,6 +84,7 @@ services:
     cpus: 1.0
 
   webmaster-worker:
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
     build:
       context: .
       dockerfile: Dockerfile.backend
@@ -98,6 +101,7 @@ services:
     cpus: 0.75
 
   organizations-worker:
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
     build:
       context: .
       dockerfile: Dockerfile.backend
@@ -114,6 +118,7 @@ services:
     cpus: 0.75
 
   organization-indexer:
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
     build:
       context: .
       dockerfile: Dockerfile.backend
@@ -132,6 +137,7 @@ services:
     cpus: 0.75
 
   address-indexer:
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
     build:
       context: .
       dockerfile: Dockerfile.backend
@@ -150,6 +156,7 @@ services:
     cpus: 0.75
 
   resource-monitor:
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
     build:
       context: .
       dockerfile: Dockerfile.backend
@@ -170,6 +177,7 @@ services:
     cpus: 0.20
 
   frontend:
+    image: ${FRONTEND_IMAGE:-poisk/frontend:local}
     build:
       context: .
       dockerfile: Dockerfile.frontend
