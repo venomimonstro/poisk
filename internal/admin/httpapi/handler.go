@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ func (h Handler) Routes()http.Handler{
 
 func (h Handler) Login(w http.ResponseWriter,r *http.Request){
 	if h.Service==nil{writeError(w,http.StatusServiceUnavailable,"admin_unavailable");return}
-	var in loginRequest;if err:=decodeOne(r,&in,8<<10);err!=nil{writeError(w,http.StatusBadRequest,"invalid_json");return}
+	var in loginRequest;if err:=decodeOne(w,r,&in,8<<10);err!=nil{writeError(w,http.StatusBadRequest,"invalid_json");return}
 	result,err:=h.Service.Login(r.Context(),in.Email,in.Password,in.SecondFactor,r.UserAgent());if err!=nil{switch{case errors.Is(err,admin.ErrAdminLocked):writeError(w,http.StatusTooManyRequests,"admin_locked");case errors.Is(err,admin.ErrAdminDisabled):writeError(w,http.StatusForbidden,"admin_disabled");default:writeError(w,http.StatusUnauthorized,"invalid_credentials")};return}
 	h.setSessionCookie(w,result.SessionToken,result.Session.ExpiresAt)
 	writeJSON(w,http.StatusOK,map[string]any{"csrf_token":result.CSRFToken,"admin":map[string]any{"id":result.Session.AdminID,"email":result.Session.Email,"role":result.Session.Role},"expires_at":result.Session.ExpiresAt})
@@ -45,6 +46,6 @@ func (h Handler) RequireRoles(roles ...string)func(http.Handler)http.Handler{ret
 func SessionFromContext(ctx context.Context)(admin.Session,bool){value,ok:=ctx.Value(sessionKey).(admin.Session);return value,ok}
 func (h Handler) setSessionCookie(w http.ResponseWriter,token string,expires time.Time){http.SetCookie(w,&http.Cookie{Name:sessionCookie,Value:token,Path:"/api/admin",Expires:expires,MaxAge:int(time.Until(expires).Seconds()),HttpOnly:true,Secure:h.SecureCookies,SameSite:http.SameSiteStrictMode})}
 func (h Handler) clearSessionCookie(w http.ResponseWriter){http.SetCookie(w,&http.Cookie{Name:sessionCookie,Value:"",Path:"/api/admin",MaxAge:-1,Expires:time.Unix(0,0),HttpOnly:true,Secure:h.SecureCookies,SameSite:http.SameSiteStrictMode})}
-func decodeOne(r *http.Request,dst any,max int64)error{r.Body=http.MaxBytesReader(nil,r.Body,max);dec:=json.NewDecoder(r.Body);dec.DisallowUnknownFields();if err:=dec.Decode(dst);err!=nil{return err};var extra any;if err:=dec.Decode(&extra);err==nil{return errors.New("trailing JSON")};return nil}
+func decodeOne(w http.ResponseWriter,r *http.Request,dst any,max int64)error{r.Body=http.MaxBytesReader(w,r.Body,max);dec:=json.NewDecoder(r.Body);dec.DisallowUnknownFields();if err:=dec.Decode(dst);err!=nil{return err};var extra any;err:=dec.Decode(&extra);if errors.Is(err,io.EOF){return nil};if err==nil{return errors.New("trailing JSON")};return err}
 func writeJSON(w http.ResponseWriter,status int,value any){w.Header().Set("Content-Type","application/json; charset=utf-8");w.Header().Set("Cache-Control","no-store");w.Header().Set("X-Content-Type-Options","nosniff");w.WriteHeader(status);_ = json.NewEncoder(w).Encode(value)}
 func writeError(w http.ResponseWriter,status int,code string){writeJSON(w,status,map[string]string{"error":code})}
