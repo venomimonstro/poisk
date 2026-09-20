@@ -1,10 +1,12 @@
 package manticore
 
 const (
-	WebIndex                   = "web_documents"
-	WebSchemaVersion           = 2
-	OrganizationsIndex         = "organizations"
-	OrganizationsSchemaVersion = 2
+	WebIndex                    = "web_documents"
+	WebSchemaVersion            = 2
+	OrganizationsIndex          = "organizations"
+	OrganizationsSchemaVersion  = 2
+	AddressesIndex              = "addresses"
+	AddressesSchemaVersion      = 1
 )
 
 const WebSchemaSQL = `CREATE TABLE IF NOT EXISTS web_documents (
@@ -40,6 +42,21 @@ const OrganizationsSchemaSQL = `CREATE TABLE IF NOT EXISTS organizations (
     status string attribute indexed
 ) morphology='stem_enru' min_word_len='2'`
 
+const AddressesSchemaSQL = `CREATE TABLE IF NOT EXISTS addresses (
+    display_name text indexed stored,
+    full_address text indexed stored,
+    normalized_name string attribute indexed,
+    region_code uint,
+    object_kind string attribute indexed,
+    level uint,
+    parent_address_id bigint,
+    latitude float,
+    longitude float,
+    has_location bool,
+    entity_version bigint,
+    status string attribute indexed
+) morphology='stem_enru' min_word_len='1'`
+
 type Document struct {
 	ID             int64
 	EntityVersion  int64
@@ -73,4 +90,20 @@ type OrganizationDocument struct {
 	QualityScore      float64
 	SourceCount       int
 	Status            string
+}
+
+type AddressDocument struct {
+	ID              int64
+	EntityVersion   int64
+	DisplayName     string
+	FullAddress     string
+	NormalizedName  string
+	RegionCode      int
+	ObjectKind      string
+	Level           int
+	ParentAddressID int64
+	Latitude        float64
+	Longitude       float64
+	HasLocation     bool
+	Status          string
 }
