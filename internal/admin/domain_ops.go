@@ -78,7 +78,7 @@ FOR UPDATE`, session.AdminID, session.ID, hash).Scan(&previewID,&domainID,&paylo
 	if _,err = tx.Exec(ctx, `UPDATE admin_action_previews SET consumed_at=now() WHERE preview_id=$1`, previewID); err != nil { return DomainMutation{}, err }
 	details,_ := json.Marshal(map[string]any{"host":host,"status":payload.Status,"policy":payload.Policy,"preview_id":previewID})
 	if _,err = tx.Exec(ctx, `INSERT INTO audit_log(actor_type,actor_id,action,entity_type,entity_id,details)
-VALUES('ADMIN',$1,'DOMAIN_POLICY_APPLY','DOMAIN',$2,$3::jsonb)`, session.AdminID, domainID, string(details)); err != nil { return DomainMutation{}, err }
+VALUES('ADMIN',$1::bigint::text,'DOMAIN_POLICY_APPLY','DOMAIN',$2::bigint::text,$3::jsonb)`, session.AdminID, domainID, string(details)); err != nil { return DomainMutation{}, err }
 	if err = tx.Commit(ctx); err != nil { return DomainMutation{}, err }
 	_ = s.Store.SecurityEvent(ctx,&session.AdminID,"DOMAIN_APPLY",true,string(details))
 	return DomainMutation{DomainID:domainID,Status:payload.Status,Policy:payload.Policy}, nil
