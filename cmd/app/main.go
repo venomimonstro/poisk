@@ -122,6 +122,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	router.With(apiGuard.Protect).Get("/api/map/config", mapHandler.Config)
 	router.With(apiGuard.Protect).Post("/api/click", trackingHandler.Click)
 	router.Mount("/api/webmaster", apiGuard.Protect(webmasterHandler.Routes()))
+	if err:=registerGeoRoute(router,apiGuard,cfg);err!=nil{return err}
 
 	server := &http.Server{Addr:cfg.Addr,Handler:router,ReadHeaderTimeout:3*time.Second,ReadTimeout:5*time.Second,WriteTimeout:5*time.Second,IdleTimeout:60*time.Second}
 	serverErr := make(chan error, 1)
