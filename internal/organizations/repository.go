@@ -46,6 +46,7 @@ type StagedRow struct {
 	Website string
 	Address string
 	NormalizedAddress string
+	CityKey string
 	CategoryKey string
 	Latitude *float64
 	Longitude *float64
@@ -98,13 +99,13 @@ WITH b AS (
 ), ins AS (
  INSERT INTO organization_staging_rows(
   batch_id,source_key,source_record_id,source_row_number,raw_payload,raw_bytes,normalized_name,normalized_phone,
-  normalized_website,normalized_address,category_key,latitude,longitude,state,payload_hash)
- SELECT b.batch_id,b.source_key,$2,$3,$4::jsonb,$5,$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),$11,$12,'VALID',$13 FROM b
+  normalized_website,normalized_address,city_key,category_key,latitude,longitude,state,payload_hash)
+ SELECT b.batch_id,b.source_key,$2,$3,$4::jsonb,$5,$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),$12,$13,'VALID',$14 FROM b
  ON CONFLICT(batch_id,source_record_id) DO UPDATE SET updated_at=organization_staging_rows.updated_at
  WHERE organization_staging_rows.payload_hash=EXCLUDED.payload_hash AND organization_staging_rows.source_row_number=EXCLUDED.source_row_number
  RETURNING staging_id
 )
-SELECT staging_id FROM ins`,batchID,row.SourceRecordID,rowNumber,string(row.RawPayload),len(row.RawPayload),row.NormalizedName,row.Phone,row.Website,row.NormalizedAddress,row.CategoryKey,row.Latitude,row.Longitude,row.PayloadHash).Scan(&id)
+SELECT staging_id FROM ins`,batchID,row.SourceRecordID,rowNumber,string(row.RawPayload),len(row.RawPayload),row.NormalizedName,row.Phone,row.Website,row.NormalizedAddress,row.CityKey,row.CategoryKey,row.Latitude,row.Longitude,row.PayloadHash).Scan(&id)
 	if errors.Is(err,pgx.ErrNoRows){return 0,ErrImportConflict}
 	if isUnique(err){return 0,ErrImportConflict}
 	if err!=nil{return 0,fmt.Errorf("stage organization row: %w",err)}
@@ -116,7 +117,7 @@ func (r *Repository) StageRejected(ctx context.Context,batchID,rowNumber int64,s
 	sourceRecordID=strings.TrimSpace(sourceRecordID);if sourceRecordID==""{sourceRecordID=fmt.Sprintf("invalid:%d",rowNumber)}
 	if len(sourceRecordID)>256{return 0,ErrInvalidRow}
 	code=strings.TrimSpace(code);if code==""||len(code)>96{return 0,ErrInvalidRow}
-	if len(detail)>1024{detail=detail[:1024]}
+	detail=truncateRunesOrg(detail,1024)
 	envelope,err:=json.Marshal(map[string]string{"raw":string(raw)});if err!=nil||len(envelope)>maxRawPayloadBytes{return 0,ErrInvalidRow}
 	sum:=sha256.Sum256(raw);hash:=hex.EncodeToString(sum[:])
 	var id int64
@@ -147,11 +148,16 @@ func (r *Repository) RowsForPlanning(ctx context.Context,batchID int64,afterID i
 	if limit<=0||limit>500{limit=100}
 	rows,err:=r.db.Query(ctx,`SELECT staging_id,batch_id,source_key,source_record_id,source_row_number,
  COALESCE((raw_payload->>'name'),''),COALESCE(normalized_name,''),COALESCE(normalized_phone,''),COALESCE(normalized_website,''),
- COALESCE((raw_payload->>'address'),''),COALESCE(normalized_address,''),COALESCE(category_key,''),latitude,longitude,payload_hash,state
+ COALESCE((raw_payload->>'address'),''),COALESCE(normalized_address,''),COALESCE(city_key,''),COALESCE(category_key,''),latitude,longitude,payload_hash,state
 FROM organization_staging_rows WHERE batch_id=$1 AND staging_id>$2 AND state='VALID' ORDER BY staging_id LIMIT $3`,batchID,afterID,limit)
 	if err!=nil{return nil,err};defer rows.Close()
 	out:=make([]StagedRow,0,limit)
-	for rows.Next(){var v StagedRow;if err:=rows.Scan(&v.ID,&v.BatchID,&v.SourceKey,&v.SourceRecordID,&v.RowNumber,&v.Name,&v.NormalizedName,&v.Phone,&v.Website,&v.Address,&v.NormalizedAddress,&v.CategoryKey,&v.Latitude,&v.Longitude,&v.PayloadHash,&v.State);err!=nil{return nil,err};out=append(out,v)}
+	for rows.Next(){
+		var v StagedRow
+		if err:=rows.Scan(&v.ID,&v.BatchID,&v.SourceKey,&v.SourceRecordID,&v.RowNumber,&v.Name,&v.NormalizedName,&v.Phone,&v.Website,&v.Address,&v.NormalizedAddress,&v.CityKey,&v.CategoryKey,&v.Latitude,&v.Longitude,&v.PayloadHash,&v.State);err!=nil{return nil,err}
+		v.Name=compactText(v.Name);v.Address=compactText(v.Address)
+		out=append(out,v)
+	}
 	return out,rows.Err()
 }
 
