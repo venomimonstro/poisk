@@ -232,7 +232,7 @@ SET status = CASE WHEN attempts >= max_attempts THEN 'DEAD' ELSE 'RETRY' END,
     updated_at = now()
 WHERE status = 'LEASED' AND lease_until < now()`
 
-	tag, err := r.db.Exec(ctx)
+	tag, err := r.db.Exec(ctx, q)
 	if err != nil {
 		return 0, fmt.Errorf("requeue expired index leases: %w", err)
 	}
