@@ -26,7 +26,7 @@ type sitemapFetcherFake struct{ result fetcher.Result; err error }
 func (f sitemapFetcherFake) Fetch(context.Context,string,fetcher.Conditional)(fetcher.Result,error){return f.result,f.err}
 
 func TestSitemapProcessorQueuesOwnedURLs(t *testing.T){
-	body:=[]byte(`<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/a?utm_source=x</loc></url><url><loc>https://example.com/b</loc></url></urlset>`)
+	body:=[]byte("<?xml version=\"1.0\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><url><loc>https://example.com/a?utm_source=x</loc></url><url><loc>https://example.com/b</loc></url></urlset>")
 	store:=&sitemapStoreFake{}
 	p:=SitemapProcessor{Store:store,Fetcher:sitemapFetcherFake{result:fetcher.Result{StatusCode:http.StatusOK,FinalURL:"https://example.com/sitemap.xml",Body:body}}}
 	err:=p.Process(context.Background(),SitemapTask{ID:1,SiteID:1,DomainID:2,Host:"example.com",URL:"https://example.com/sitemap.xml"})
@@ -36,7 +36,7 @@ func TestSitemapProcessorQueuesOwnedURLs(t *testing.T){
 }
 
 func TestSitemapProcessorQueuesChildSitemaps(t *testing.T){
-	body:=[]byte(`<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>https://example.com/a.xml</loc></sitemap></sitemapindex>`)
+	body:=[]byte("<?xml version=\"1.0\"?><sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"><sitemap><loc>https://example.com/a.xml</loc></sitemap></sitemapindex>")
 	store:=&sitemapStoreFake{}
 	p:=SitemapProcessor{Store:store,Fetcher:sitemapFetcherFake{result:fetcher.Result{StatusCode:http.StatusOK,FinalURL:"https://example.com/sitemap.xml",Body:body}}}
 	if err:=p.Process(context.Background(),SitemapTask{ID:1,SiteID:1,DomainID:2,Host:"example.com",URL:"https://example.com/sitemap.xml"});err!=nil{t.Fatal(err)}
@@ -44,7 +44,7 @@ func TestSitemapProcessorQueuesChildSitemaps(t *testing.T){
 }
 
 func TestSitemapProcessorRejectsCrossHostContent(t *testing.T){
-	body:=[]byte(`<?xml version="1.0"?><urlset><url><loc>https://other.test/a</loc></url></urlset>`)
+	body:=[]byte("<?xml version=\"1.0\"?><urlset><url><loc>https://other.test/a</loc></url></urlset>")
 	store:=&sitemapStoreFake{}
 	p:=SitemapProcessor{Store:store,Fetcher:sitemapFetcherFake{result:fetcher.Result{StatusCode:http.StatusOK,FinalURL:"https://example.com/sitemap.xml",Body:body}}}
 	err:=p.Process(context.Background(),SitemapTask{ID:1,Host:"example.com",URL:"https://example.com/sitemap.xml"})
@@ -54,6 +54,6 @@ func TestSitemapProcessorRejectsCrossHostContent(t *testing.T){
 
 func TestSitemapProcessorRejectsCrossHostRedirect(t *testing.T){
 	store:=&sitemapStoreFake{}
-	p:=SitemapProcessor{Store:store,Fetcher:sitemapFetcherFake{result:fetcher.Result{StatusCode:http.StatusOK,FinalURL:"https://other.test/sitemap.xml",Body:[]byte(`<urlset></urlset>`)}}}
+	p:=SitemapProcessor{Store:store,Fetcher:sitemapFetcherFake{result:fetcher.Result{StatusCode:http.StatusOK,FinalURL:"https://other.test/sitemap.xml",Body:[]byte("<urlset></urlset>")}}}
 	if err:=p.Process(context.Background(),SitemapTask{ID:1,Host:"example.com",URL:"https://example.com/sitemap.xml"});err==nil{t.Fatal("cross-host redirect accepted")}
 }
