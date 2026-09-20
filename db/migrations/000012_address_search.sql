@@ -33,9 +33,7 @@ CREATE TABLE address_staging_rows (
     is_active BOOLEAN,
     payload_hash CHAR(64) NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}$'),
     raw_payload JSONB NOT NULL,
-    state TEXT NOT NULL DEFAULT 'VALID' CHECK (state IN ('VALID','REJECTED','APPLIED')),
-    rejection_code TEXT,
-    rejection_detail TEXT,
+    state TEXT NOT NULL DEFAULT 'VALID' CHECK (state IN ('VALID','APPLIED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(batch_id,source_file,source_row),
@@ -43,6 +41,22 @@ CREATE TABLE address_staging_rows (
 );
 CREATE INDEX idx_address_staging_resolve ON address_staging_rows(batch_id,record_kind,region_code,object_id) WHERE state='VALID';
 CREATE INDEX idx_address_staging_parent ON address_staging_rows(batch_id,region_code,parent_object_id) WHERE parent_object_id IS NOT NULL AND state='VALID';
+
+CREATE TABLE address_import_rejections (
+    rejection_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    batch_id BIGINT NOT NULL REFERENCES address_import_batches(batch_id) ON DELETE CASCADE,
+    source_file TEXT NOT NULL,
+    source_row BIGINT NOT NULL CHECK (source_row > 0),
+    record_kind TEXT NOT NULL CHECK (record_kind IN ('ADDR_OBJ','HOUSE','HIERARCHY')),
+    region_code SMALLINT NOT NULL CHECK (region_code BETWEEN 1 AND 99),
+    error_code TEXT NOT NULL,
+    error_detail TEXT,
+    raw_payload JSONB NOT NULL,
+    payload_hash CHAR(64) NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}$'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(batch_id,source_file,source_row)
+);
+CREATE INDEX idx_address_rejections_batch ON address_import_rejections(batch_id,rejection_id);
 
 CREATE TABLE addresses (
     address_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
