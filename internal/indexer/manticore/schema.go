@@ -1,8 +1,10 @@
 package manticore
 
 const (
-	WebIndex         = "web_documents"
-	WebSchemaVersion = 2
+	WebIndex              = "web_documents"
+	WebSchemaVersion      = 2
+	OrganizationsIndex    = "organizations"
+	OrganizationsSchemaVersion = 1
 )
 
 // WebSchemaSQL is the bootstrap schema for a fresh table. Existing RT tables
@@ -23,6 +25,23 @@ const WebSchemaSQL = `CREATE TABLE IF NOT EXISTS web_documents (
     fetched_at timestamp
 ) morphology='stem_enru' min_word_len='2'`
 
+const OrganizationsSchemaSQL = `CREATE TABLE IF NOT EXISTS organizations (
+    name text indexed stored,
+    address text indexed stored,
+    category_key string attribute indexed,
+    phone string attribute,
+    website string attribute indexed,
+    normalized_name string attribute indexed,
+    normalized_address string attribute indexed,
+    latitude float,
+    longitude float,
+    has_location bool,
+    quality_score float,
+    source_count uint,
+    entity_version bigint,
+    status string attribute indexed
+) morphology='stem_enru' min_word_len='2'`
+
 type Document struct {
 	ID             int64
 	EntityVersion  int64
@@ -37,4 +56,22 @@ type Document struct {
 	SpamScore      float64
 	AuthorityScore float64
 	FetchedAtUnix  int64
+}
+
+type OrganizationDocument struct {
+	ID                int64
+	EntityVersion     int64
+	Name              string
+	Address           string
+	CategoryKey       string
+	Phone             string
+	Website           string
+	NormalizedName    string
+	NormalizedAddress string
+	Latitude          float64
+	Longitude         float64
+	HasLocation       bool
+	QualityScore      float64
+	SourceCount       int
+	Status            string
 }
