@@ -19,16 +19,101 @@ type MapConfig = {
   attribution_html: string;
 };
 
+type GeoResult = {
+  id: number;
+  name: string;
+  address: string;
+  city_key?: string;
+  category_key?: string;
+  phone?: string;
+  website?: string;
+  latitude?: number;
+  longitude?: number;
+  quality_score: number;
+  source_count: number;
+};
+
+type GeoCluster = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  count: number;
+  place_ids?: number[];
+};
+
+type ViewportResponse = {
+  total: number;
+  took_ms: number;
+  results: GeoResult[];
+  clusters: GeoCluster[];
+};
+
 export default function MapPage() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const markerRef = useRef<maplibregl.Marker[]>([]);
+  const requestRef = useRef<AbortController | null>(null);
+  const resultsRef = useRef<Map<number, GeoResult>>(new Map());
   const [status, setStatus] = useState("Загружаем карту…");
   const [version, setVersion] = useState("");
+  const [selected, setSelected] = useState<GeoResult | null>(null);
+  const [geoMeta, setGeoMeta] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     const protocol = new Protocol();
     maplibregl.addProtocol("pmtiles", protocol.tile);
+
+    async function refreshOrganizations(map: maplibregl.Map) {
+      const bounds = map.getBounds();
+      if (!bounds) return;
+      requestRef.current?.abort();
+      const controller = new AbortController();
+      requestRef.current = controller;
+      const params = new URLSearchParams({
+        min_lat: bounds.getSouth().toFixed(6),
+        min_lon: bounds.getWest().toFixed(6),
+        max_lat: bounds.getNorth().toFixed(6),
+        max_lon: bounds.getEast().toFixed(6),
+        zoom: map.getZoom().toFixed(2),
+        limit: "200",
+      });
+      try {
+        const response = await fetch(`/api/geo/viewport?${params.toString()}`, {
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!response.ok) throw new Error("geo_viewport_unavailable");
+        const data = (await response.json()) as ViewportResponse;
+        if (cancelled || controller.signal.aborted) return;
+        resultsRef.current = new Map(data.results.map((item) => [item.id, item]));
+        markerRef.current.forEach((marker) => marker.remove());
+        markerRef.current = data.clusters.map((cluster) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = cluster.count > 1 ? "geoClusterMarker" : "geoPlaceMarker";
+          button.textContent = cluster.count > 1 ? String(cluster.count) : "";
+          button.setAttribute("aria-label", cluster.count > 1 ? `${cluster.count} организаций` : "Организация");
+          button.addEventListener("click", () => {
+            if (cluster.count > 1) {
+              map.easeTo({ center: [cluster.longitude, cluster.latitude], zoom: Math.min(map.getZoom() + 2, map.getMaxZoom()) });
+              return;
+            }
+            const placeID = cluster.place_ids?.[0];
+            if (placeID) setSelected(resultsRef.current.get(placeID) || null);
+          });
+          return new maplibregl.Marker({ element: button, anchor: "center" })
+            .setLngLat([cluster.longitude, cluster.latitude])
+            .addTo(map);
+        });
+        setGeoMeta(data.total > data.results.length ? `Показаны ${data.results.length} из ${data.total}` : `${data.results.length} организаций`);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.error("geo viewport failed", error);
+        if (!cancelled) setGeoMeta("Организации временно недоступны");
+      }
+    }
 
     async function boot() {
       try {
@@ -78,8 +163,10 @@ export default function MapPage() {
           if (!cancelled) {
             setVersion(config.version);
             setStatus("");
+            void refreshOrganizations(map);
           }
         });
+        map.on("moveend", () => void refreshOrganizations(map));
         map.on("error", (event) => {
           console.error("map error", event.error);
           if (!cancelled) setStatus("Не удалось загрузить часть карты.");
@@ -93,6 +180,9 @@ export default function MapPage() {
     void boot();
     return () => {
       cancelled = true;
+      requestRef.current?.abort();
+      markerRef.current.forEach((marker) => marker.remove());
+      markerRef.current = [];
       mapRef.current?.remove();
       mapRef.current = null;
       maplibregl.removeProtocol("pmtiles");
@@ -106,9 +196,23 @@ export default function MapPage() {
         <div>
           <strong>Карта</strong>
           {version && <span className="mapVersion"> версия {version}</span>}
+          {geoMeta && <span className="mapVersion"> · {geoMeta}</span>}
         </div>
       </header>
       <div className="mapViewport" ref={containerRef} aria-label="Интерактивная карта" />
+      {selected && (
+        <aside className="geoCard" aria-label="Организация">
+          <button className="geoCardClose" type="button" onClick={() => setSelected(null)} aria-label="Закрыть">×</button>
+          <div className="geoCardCategory">{selected.category_key || "Организация"}</div>
+          <strong className="geoCardTitle">{selected.name}</strong>
+          {selected.address && <div className="geoCardAddress">{selected.address}</div>}
+          <div className="geoCardMeta">Источников: {selected.source_count}</div>
+          <div className="geoCardActions">
+            {selected.website && <a href={selected.website} rel="noopener noreferrer">Сайт</a>}
+            {selected.phone && <a href={`tel:${selected.phone}`}>Позвонить</a>}
+          </div>
+        </aside>
+      )}
       {status && <div className="mapStatus" role="status">{status}</div>}
     </main>
   );
