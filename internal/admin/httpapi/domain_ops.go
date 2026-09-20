@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/venomimonstro/poisk/internal/admin"
 )
@@ -13,6 +14,15 @@ type domainPreviewRequest struct {
 	Policy   string `json:"policy"`
 }
 type domainApplyRequest struct { PreviewToken string `json:"preview_token"` }
+
+func (h Handler) Domains(w http.ResponseWriter,r *http.Request){
+	if h.Service==nil{writeError(w,http.StatusServiceUnavailable,"admin_unavailable");return}
+	session,ok:=SessionFromContext(r.Context());if !ok{writeError(w,http.StatusUnauthorized,"unauthorized");return}
+	limit:=20;if raw:=r.URL.Query().Get("limit");raw!=""{value,err:=strconv.Atoi(raw);if err!=nil||value<1||value>50{writeError(w,http.StatusBadRequest,"invalid_limit");return};limit=value}
+	rows,err:=h.Service.ListDomains(r.Context(),session,r.URL.Query().Get("q"),limit)
+	if err!=nil{if errors.Is(err,admin.ErrForbidden){writeError(w,http.StatusForbidden,"forbidden");return};writeError(w,http.StatusServiceUnavailable,"domains_unavailable");return}
+	writeJSON(w,http.StatusOK,map[string]any{"results":rows})
+}
 
 func (h Handler) DomainPreview(w http.ResponseWriter,r *http.Request){
 	if h.Service==nil{writeError(w,http.StatusServiceUnavailable,"admin_unavailable");return}
