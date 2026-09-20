@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"sort"
 	"strings"
+
+	"github.com/venomimonstro/poisk/internal/crawler/urlnorm"
 )
 
 func (r *Repository) RecordSearchImpressions(ctx context.Context, hosts []string) error {
@@ -18,9 +19,24 @@ func (r *Repository) RecordAnswerCitations(ctx context.Context, hosts []string) 
 }
 
 func (r *Repository) RecordClick(ctx context.Context, rawURL string) error {
-	u,err:=url.Parse(strings.TrimSpace(rawURL))
-	if err!=nil || (u.Scheme!="http" && u.Scheme!="https") || u.Hostname()=="" || u.User!=nil { return ErrInvalidInput }
-	return r.recordHostMetric(ctx,[]string{u.Hostname()},"clicks")
+	if r==nil || r.db==nil{return errors.New("webmaster repository is not initialized")}
+	normalized,err:=urlnorm.Normalize(strings.TrimSpace(rawURL))
+	if err!=nil{return ErrInvalidInput}
+	_,err=r.db.Exec(ctx,`
+WITH matched AS (
+    SELECT s.site_id
+    FROM urls u
+    JOIN webmaster_sites s ON s.domain_id=u.domain_id
+    WHERE u.normalized_url=$1
+      AND u.index_status='INDEXED'
+      AND s.status='VERIFIED'
+)
+INSERT INTO webmaster_metrics_daily(site_id,day,clicks)
+SELECT site_id,current_date,1 FROM matched
+ON CONFLICT(site_id,day) DO UPDATE
+SET clicks=webmaster_metrics_daily.clicks+1`,normalized)
+	if err!=nil{return fmt.Errorf("record webmaster click: %w",err)}
+	return nil
 }
 
 func (r *Repository) recordHostMetric(ctx context.Context,hosts []string,metric string) error {
@@ -42,12 +58,6 @@ SELECT s.site_id,sum(i.n)::bigint n FROM incoming i JOIN webmaster_sites s ON lo
 INSERT INTO webmaster_metrics_daily(site_id,day,impressions)
 SELECT site_id,current_date,n FROM matched
 ON CONFLICT(site_id,day) DO UPDATE SET impressions=webmaster_metrics_daily.impressions+EXCLUDED.impressions`
-	case "clicks":
-		q=`WITH incoming(host,n) AS (SELECT * FROM unnest($1::text[],$2::bigint[])), matched AS (
-SELECT s.site_id,sum(i.n)::bigint n FROM incoming i JOIN webmaster_sites s ON lower(s.host)=i.host WHERE s.status='VERIFIED' GROUP BY s.site_id)
-INSERT INTO webmaster_metrics_daily(site_id,day,clicks)
-SELECT site_id,current_date,n FROM matched
-ON CONFLICT(site_id,day) DO UPDATE SET clicks=webmaster_metrics_daily.clicks+EXCLUDED.clicks`
 	case "answer_citations":
 		q=`WITH incoming(host,n) AS (SELECT * FROM unnest($1::text[],$2::bigint[])), matched AS (
 SELECT s.site_id,sum(i.n)::bigint n FROM incoming i JOIN webmaster_sites s ON lower(s.host)=i.host WHERE s.status='VERIFIED' GROUP BY s.site_id)
