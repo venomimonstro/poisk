@@ -1,15 +1,12 @@
 package manticore
 
 const (
-	WebIndex              = "web_documents"
-	WebSchemaVersion      = 2
-	OrganizationsIndex    = "organizations"
+	WebIndex                   = "web_documents"
+	WebSchemaVersion           = 2
+	OrganizationsIndex         = "organizations"
 	OrganizationsSchemaVersion = 1
 )
 
-// WebSchemaSQL is the bootstrap schema for a fresh table. Existing RT tables
-// are upgraded explicitly by EnsureSchema so CREATE IF NOT EXISTS never hides
-// a missing attribute.
 const WebSchemaSQL = `CREATE TABLE IF NOT EXISTS web_documents (
     title text indexed stored,
     description text indexed stored,
@@ -28,6 +25,7 @@ const WebSchemaSQL = `CREATE TABLE IF NOT EXISTS web_documents (
 const OrganizationsSchemaSQL = `CREATE TABLE IF NOT EXISTS organizations (
     name text indexed stored,
     address text indexed stored,
+    city_key string attribute indexed,
     category_key string attribute indexed,
     phone string attribute,
     website string attribute indexed,
@@ -63,6 +61,7 @@ type OrganizationDocument struct {
 	EntityVersion     int64
 	Name              string
 	Address           string
+	CityKey           string
 	CategoryKey       string
 	Phone             string
 	Website           string
