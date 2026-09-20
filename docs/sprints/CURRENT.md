@@ -1,10 +1,10 @@
 # CURRENT SPRINT
 
-**Sprint:** 12 — Maps
+**Sprint:** 13 — Organizations Import
 **Status:** IN_PROGRESS
 
 ## Goal
-Добавить независимый картографический слой на базе OSM/PMTiles/MapLibre: versioned map artifacts, безопасный manifest, runtime map configuration, frontend map rendering и rollback без зависимости от GEO/organizations следующих спринтов.
+Построить безопасный и возобновляемый импорт организаций: внешние записи сначала попадают в staging, проходят source-specific parsing, validation и normalization, затем dedup/merge формируют каноническую OUR PLACE сущность. Ошибочная партия должна поддерживать dry-run, повторный запуск и продолжение после сбоя без загрязнения canonical данных.
 
 ## Depends On
 - Sprint 00 — PASS
@@ -19,42 +19,49 @@
 - Sprint 09 — PASS (code/static gate)
 - Sprint 10 — PASS (code/static gate)
 - Sprint 11 — PASS (code/static gate)
+- Sprint 12 — PASS (code/static gate)
 
 ## Allowed Work
-- OSM attribution and map source policy
-- PMTiles artifact manifest and immutable versions
-- active map version pointer
-- rollback to previous validated version
-- map file integrity metadata (size/hash/version)
-- bounded map manifest API
-- MapLibre frontend integration
-- PMTiles protocol integration
-- simple map screen and viewport state
-- static/self-hosted map style configuration
-- validation tests for manifests/version switching/rollback
-- deployment paths for immutable map artifacts
+- source adapter contracts for organization datasets
+- import batch/job state and resumable checkpoints
+- staging tables isolated from canonical organizations
+- bounded raw payload storage / source row identity
+- validation and rejection reasons
+- normalization of names, phones, websites, categories and coordinates
+- canonical OUR PLACE organization model
+- source record → canonical place provenance
+- deterministic exact/strong dedup rules
+- review queue for ambiguous duplicates
+- dry-run import and merge plans
+- idempotent apply/resume/retry
+- transactional canonical updates and index outbox events
+- import metrics/audit events
+- unit/integration/security tests for import isolation and idempotency
 
 ## Forbidden Work
-- organization import
-- GEO search or nearby ranking
-- business cards/claiming
-- FIAS/GAR geocoding
-- paid map APIs required for core rendering
-- arbitrary remote tile proxying
-- runtime mutation of immutable PMTiles files
+- GEO search/ranking/nearby API
+- organization cards in consumer search
+- organization claiming
+- FIAS/GAR address index or geocoding
+- paid organization data APIs required for core import
+- direct writes from external adapters to canonical organizations
+- auto-merging ambiguous fuzzy matches without a deterministic confidence rule
 - Redis/Kafka/RabbitMQ
 - GitHub Actions/CI
 
 ## Definition of Done
-- [ ] map artifacts are immutable and version identified
-- [ ] active version is stored separately from artifacts
-- [ ] manifest validates path/hash/size/bounds/version
-- [ ] map config API exposes only validated active artifact metadata
-- [ ] rollback can atomically switch to a prior validated version
-- [ ] MapLibre renders the configured PMTiles source
-- [ ] OSM attribution is visible
-- [ ] missing/corrupt active version fails safely
-- [ ] tests cover manifest validation, activation and rollback rules
-- [ ] no GEO/organization scope is pulled into Sprint 12
+- [ ] import batches are resumable and idempotent
+- [ ] raw/source rows are isolated in staging before canonical mutation
+- [ ] malformed rows are rejected with bounded diagnostics, not partially imported
+- [ ] normalized organization records have deterministic source identity
+- [ ] OUR PLACE canonical schema exists with versioning
+- [ ] exact/strong duplicates merge deterministically
+- [ ] ambiguous matches go to review instead of automatic destructive merge
+- [ ] dry-run produces a stable merge/create/reject plan without canonical writes
+- [ ] apply uses transactions and emits versioned index outbox events
+- [ ] retry/resume cannot create duplicate canonical places
+- [ ] provenance from source row to canonical place is queryable
+- [ ] tests cover duplicate rows, worker crash/resume, dry-run and ambiguous match handling
+- [ ] no GEO search/organization UI scope is pulled into Sprint 13
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 12 report created
+- [ ] Sprint 13 report created
