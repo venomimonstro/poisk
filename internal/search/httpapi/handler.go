@@ -36,10 +36,14 @@ func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.SearchService.Search(r.Context(), searchsvc.Request{Query: r.URL.Query().Get("q"), Limit: limit})
 	if err != nil {
 		switch {
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+			writeError(w, http.StatusGatewayTimeout, "search_timeout")
 		case errors.Is(err, querynorm.ErrEmptyQuery):
 			writeError(w, http.StatusBadRequest, "empty_query")
 		case errors.Is(err, querynorm.ErrQueryTooLong), errors.Is(err, querynorm.ErrInvalidQuery):
 			writeError(w, http.StatusBadRequest, "invalid_query")
+		case errors.Is(err, querynorm.ErrQueryTooComplex):
+			writeError(w, http.StatusBadRequest, "query_too_complex")
 		default:
 			writeError(w, http.StatusBadGateway, "search_backend_error")
 		}
