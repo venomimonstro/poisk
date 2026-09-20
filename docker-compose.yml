@@ -73,6 +73,22 @@ services:
     mem_limit: 512m
     cpus: 1.0
 
+  webmaster-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["webmaster-worker"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 384m
+    cpus: 0.75
+
   frontend:
     build:
       context: .
