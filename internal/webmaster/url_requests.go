@@ -19,9 +19,15 @@ func (r *Repository) QueueURLRequest(ctx context.Context, userID, siteID int64, 
 	defer func(){ _ = tx.Rollback(ctx) }()
 
 	var siteDomainID int64
-	err = tx.QueryRow(ctx, `SELECT domain_id FROM webmaster_sites WHERE site_id=$1 AND user_id=$2 AND status='VERIFIED' FOR SHARE`, siteID, userID).Scan(&siteDomainID)
+	var domainStatus,domainPolicy string
+	err = tx.QueryRow(ctx, `
+SELECT s.domain_id,d.status,d.policy
+FROM webmaster_sites s JOIN domains d ON d.domain_id=s.domain_id
+WHERE s.site_id=$1 AND s.user_id=$2 AND s.status='VERIFIED'
+FOR SHARE OF s,d`, siteID, userID).Scan(&siteDomainID,&domainStatus,&domainPolicy)
 	if errors.Is(err, pgx.ErrNoRows) { return 0, ErrNotVerified }
 	if err != nil { return 0, fmt.Errorf("load verified webmaster site: %w", err) }
+	if domainStatus!="ACTIVE" || domainPolicy=="BLOCK" { return 0,ErrSiteBlocked }
 
 	var urlID, version, urlDomainID int64
 	switch operation {
@@ -29,13 +35,18 @@ func (r *Repository) QueueURLRequest(ctx context.Context, userID, siteID int64, 
 		err = tx.QueryRow(ctx, `
 INSERT INTO urls(domain_id,normalized_url,crawl_status,index_status,next_crawl_at)
 VALUES($1,$2,'DISCOVERED','NOT_INDEXED',now())
-ON CONFLICT(normalized_url) DO UPDATE SET next_crawl_at=now(), updated_at=now()
+ON CONFLICT(normalized_url) DO UPDATE SET
+    next_crawl_at=now(),
+    index_status=CASE WHEN urls.index_status='DELETED' THEN 'NOT_INDEXED' ELSE urls.index_status END,
+    crawl_status=CASE WHEN urls.crawl_status='BLOCKED' THEN 'BLOCKED' ELSE 'DISCOVERED' END,
+    updated_at=now()
 RETURNING url_id,version,domain_id`, siteDomainID, normalizedURL).Scan(&urlID,&version,&urlDomainID)
 		if err != nil { return 0, fmt.Errorf("ensure webmaster URL: %w",err) }
 		if urlDomainID != siteDomainID { return 0, ErrNotFound }
 		if _,err=tx.Exec(ctx, `
 INSERT INTO crawl_queue(url_id,domain_id,generation,priority,status,available_at)
-VALUES($1,$2,$3,100,'READY',now())
+SELECT $1,$2,$3,100,'READY',now()
+WHERE EXISTS (SELECT 1 FROM urls WHERE url_id=$1 AND crawl_status<>'BLOCKED')
 ON CONFLICT DO NOTHING`,urlID,siteDomainID,version); err!=nil { return 0,fmt.Errorf("enqueue webmaster crawl: %w",err) }
 	case "DELETE":
 		err = tx.QueryRow(ctx, `
@@ -50,7 +61,7 @@ INSERT INTO index_outbox(entity_type,entity_id,entity_version,operation,availabl
 VALUES('WEB_DOCUMENT',$1,$2,'DELETE',now())
 ON CONFLICT(entity_type,entity_id,entity_version,operation) DO NOTHING`,urlID,version); err!=nil { return 0,fmt.Errorf("enqueue webmaster delete: %w",err) }
 	default:
-		return 0, errors.New("invalid webmaster URL operation")
+		return 0, ErrInvalidInput
 	}
 
 	var requestID int64
