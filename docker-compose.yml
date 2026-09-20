@@ -46,9 +46,11 @@ services:
     environment:
       MAP_ARTIFACT_ROOT: /maps
       ORG_IMPORT_ROOT: /imports
+      ADDRESS_IMPORT_ROOT: /address-imports
     volumes:
       - ./data/maps:/maps:ro
       - ./data/imports:/imports:ro
+      - ./data/address-imports:/address-imports:ro
     depends_on:
       postgres:
         condition: service_healthy
