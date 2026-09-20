@@ -23,7 +23,9 @@ import (
 	"github.com/venomimonstro/poisk/internal/indexer/source"
 	indexworker "github.com/venomimonstro/poisk/internal/indexer/worker"
 	"github.com/venomimonstro/poisk/internal/platform/config"
+	"github.com/venomimonstro/poisk/internal/platform/guard"
 	"github.com/venomimonstro/poisk/internal/platform/health"
+	platformmetrics "github.com/venomimonstro/poisk/internal/platform/metrics"
 	"github.com/venomimonstro/poisk/internal/platform/migrate"
 	"github.com/venomimonstro/poisk/internal/quality"
 	searchsvc "github.com/venomimonstro/poisk/internal/search"
@@ -74,10 +76,19 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 
 	searchBackend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create search backend: %w", err) }
-	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512)}
+	searchService := &searchsvc.Service{
+		Backend: searchBackend,
+		Cache: searchsvc.NewCache(512),
+		BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent),
+	}
 	searchHandler := searchhttp.Handler{SearchService: searchService}
 	answerService := &answersvc.Service{Search: searchService, MinConfidence: answersvc.DefaultMinConfidence}
 	answerHandler := answerhttp.Handler{AnswerService: answerService}
+
+	latencyRecorder := platformmetrics.NewLatencyRecorder(4096)
+	apiLimiter := guard.NewLimiter(cfg.APIRatePerSecond, cfg.APIRateBurst, cfg.APIRateClients, cfg.APIRateIdleTTL)
+	apiGuard := guard.NewMiddleware(apiLimiter, cfg.APIRequestConcurrent, cfg.APIRequestDeadline)
+	apiGuard.Latency = latencyRecorder
 
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
@@ -85,8 +96,9 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	router.Use(middleware.Recoverer)
 	router.Get("/health/live", checker.Live)
 	router.Get("/health/ready", checker.Ready)
-	router.Get("/api/search", searchHandler.Search)
-	router.Get("/api/answer", answerHandler.Answer)
+	router.Get("/health/perf", perfHandler(latencyRecorder))
+	router.With(apiGuard.Protect).Get("/api/search", searchHandler.Search)
+	router.With(apiGuard.Protect).Get("/api/answer", answerHandler.Answer)
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
@@ -116,6 +128,20 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	return server.Shutdown(shutdownCtx)
+}
+
+func perfHandler(recorder *platformmetrics.LatencyRecorder) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s := recorder.Snapshot()
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"count": s.Count,
+			"p50_ms": float64(s.P50.Microseconds()) / 1000,
+			"p95_ms": float64(s.P95.Microseconds()) / 1000,
+			"p99_ms": float64(s.P99.Microseconds()) / 1000,
+		})
+	}
 }
 
 func runIndexer(cfg config.Config, pool *pgxpool.Pool) error {
@@ -167,7 +193,7 @@ func runQuality(cfg config.Config) error {
 
 	backend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create quality search backend: %w", err) }
-	service := &searchsvc.Service{Backend: backend}
+	service := &searchsvc.Service{Backend: backend, BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent)}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
