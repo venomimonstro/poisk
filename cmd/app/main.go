@@ -73,6 +73,8 @@ func run() error {
 		return runOrganizationIndexer(cfg, pool)
 	case "address-indexer":
 		return runAddressIndexer(cfg, pool)
+	case "resource-monitor":
+		return runResourceMonitor(pool)
 	case "mapctl":
 		return runMapCtl(ctx, pool, os.Args[2:])
 	case "orgctl":
@@ -81,6 +83,8 @@ func run() error {
 		return runAddressCtl(ctx, cfg, pool, os.Args[2:])
 	case "adminctl":
 		return runAdminCtl(ctx, pool, os.Args[2:])
+	case "releasectl":
+		return runReleaseCtl(ctx, pool, os.Args[2:])
 	case "quality":
 		return runQuality(cfg)
 	default:
