@@ -52,6 +52,20 @@ p { margin: 0 auto 28px; max-width: 650px; line-height: 1.6; color: #5b6472; }
 .mapViewport { width: 100%; height: 100%; }
 .mapStatus { position: absolute; z-index: 6; inset: 50% auto auto 50%; transform: translate(-50%,-50%); padding: 12px 16px; border-radius: 12px; background: rgba(17,24,39,.90); color: #fff; font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
 .maplibregl-ctrl-attrib { max-width: min(70vw, 720px); }
+.geoClusterMarker, .geoPlaceMarker { display: grid; place-items: center; border: 2px solid #fff; border-radius: 999px; background: #111827; color: #fff; box-shadow: 0 3px 12px rgba(0,0,0,.25); cursor: pointer; }
+.geoClusterMarker { width: 36px; height: 36px; font-size: 12px; font-weight: 800; }
+.geoPlaceMarker { width: 18px; height: 18px; }
+.geoClusterMarker:focus-visible, .geoPlaceMarker:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.geoCard { position: absolute; z-index: 7; left: 16px; bottom: 34px; width: min(360px, calc(100vw - 32px)); padding: 20px; border: 1px solid rgba(17,24,39,.10); border-radius: 16px; background: rgba(255,255,255,.97); box-shadow: 0 14px 42px rgba(0,0,0,.16); backdrop-filter: blur(8px); }
+.geoCardClose { position: absolute; top: 9px; right: 10px; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: #6b7280; font-size: 23px; cursor: pointer; }
+.geoCardClose:hover { background: #f3f4f6; color: #111827; }
+.geoCardCategory { margin: 0 36px 7px 0; color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.geoCardTitle { display: block; margin-right: 32px; font-size: 20px; line-height: 1.25; }
+.geoCardAddress { margin-top: 8px; color: #4b5563; line-height: 1.45; }
+.geoCardMeta { margin-top: 10px; color: #6b7280; font-size: 12px; }
+.geoCardActions { display: flex; gap: 10px; margin-top: 16px; }
+.geoCardActions a { padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 9px; text-decoration: none; font-size: 13px; font-weight: 700; }
+.geoCardActions a:hover { border-color: #111827; }
 
 @media (max-width: 640px) {
   .shell { padding: 22px 14px; }
@@ -68,4 +82,5 @@ p { margin: 0 auto 28px; max-width: 650px; line-height: 1.6; color: #5b6472; }
   .serpMeta { line-height: 1.5; }
   .mapHeader { top: 10px; left: 10px; right: 58px; gap: 10px; padding: 10px 12px; }
   .mapVersion { display: none; }
+  .geoCard { left: 10px; bottom: 28px; width: calc(100vw - 20px); padding: 17px; }
 }
