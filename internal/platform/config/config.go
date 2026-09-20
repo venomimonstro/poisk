@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -25,15 +26,19 @@ type Config struct {
 	APIRateBurst         int
 	APIRateClients       int
 	APIRateIdleTTL       time.Duration
+	MapArtifactRoot      string
+	MapPublicPrefix      string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Env:           getenv("APP_ENV", "development"),
-		Addr:          getenv("APP_ADDR", ":8080"),
-		LogLevel:      getenv("LOG_LEVEL", "info"),
-		ManticoreHost: getenv("MANTICORE_HOST", "manticore"),
-		MigrationsDir: getenv("MIGRATIONS_DIR", "/app/db/migrations"),
+		Env:             getenv("APP_ENV", "development"),
+		Addr:            getenv("APP_ADDR", ":8080"),
+		LogLevel:        getenv("LOG_LEVEL", "info"),
+		ManticoreHost:   getenv("MANTICORE_HOST", "manticore"),
+		MigrationsDir:   getenv("MIGRATIONS_DIR", "/app/db/migrations"),
+		MapArtifactRoot: getenv("MAP_ARTIFACT_ROOT", "/srv/maps"),
+		MapPublicPrefix: getenv("MAP_PUBLIC_PREFIX", "/maps"),
 	}
 
 	shutdown, err := positiveDuration("APP_SHUTDOWN_TIMEOUT", "10s")
@@ -62,10 +67,11 @@ func Load() (Config, error) {
 	if cfg.APIRateClients, err = positiveInt("API_RATE_MAX_CLIENTS", "10000"); err != nil { return Config{}, err }
 
 	rate, err := strconv.ParseFloat(getenv("API_RATE_PER_SECOND", "10"), 64)
-	if err != nil || rate <= 0 || rate > 100000 {
-		return Config{}, fmt.Errorf("invalid API_RATE_PER_SECOND")
-	}
+	if err != nil || rate <= 0 || rate > 100000 { return Config{}, fmt.Errorf("invalid API_RATE_PER_SECOND") }
 	cfg.APIRatePerSecond = rate
+
+	if strings.TrimSpace(cfg.MapArtifactRoot)=="" { return Config{}, errors.New("MAP_ARTIFACT_ROOT is required") }
+	if !strings.HasPrefix(cfg.MapPublicPrefix,"/") || strings.Contains(cfg.MapPublicPrefix,"..") || strings.ContainsAny(cfg.MapPublicPrefix,"?#") { return Config{}, errors.New("invalid MAP_PUBLIC_PREFIX") }
 
 	db := getenv("POSTGRES_DB", "poisk")
 	user := getenv("POSTGRES_USER", "poisk")
