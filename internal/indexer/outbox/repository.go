@@ -16,10 +16,21 @@ var (
 
 type Repository struct {
 	db *pgxpool.Pool
+	entityTypes []string
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
+}
+
+func NewRepositoryForEntityTypes(db *pgxpool.Pool, entityTypes ...string) *Repository {
+	filtered:=make([]string,0,len(entityTypes))
+	seen:=make(map[string]struct{},len(entityTypes))
+	for _,value:=range entityTypes{
+		if value!="WEB_DOCUMENT"&&value!="ORGANIZATION"&&value!="ADDRESS"{continue}
+		if _,ok:=seen[value];ok{continue};seen[value]=struct{}{};filtered=append(filtered,value)
+	}
+	return &Repository{db:db,entityTypes:filtered}
 }
 
 type Event struct {
@@ -91,12 +102,15 @@ func (r *Repository) Lease(ctx context.Context, workerID string, batchSize, leas
 	if _, err := r.SupersedeStale(ctx); err != nil {
 		return nil, err
 	}
+	entityTypes:=r.entityTypes
+	if len(entityTypes)==0{entityTypes=[]string{"WEB_DOCUMENT","ORGANIZATION","ADDRESS"}}
 
 	const q = `
 WITH picked AS (
     SELECT candidate.id
     FROM index_outbox AS candidate
     WHERE candidate.status IN ('READY','RETRY')
+      AND candidate.entity_type = ANY($4::text[])
       AND candidate.available_at <= now()
       AND candidate.attempts < candidate.max_attempts
       AND NOT EXISTS (
@@ -128,7 +142,7 @@ WHERE o.id = picked.id
 RETURNING o.id, o.entity_type, o.entity_id, o.entity_version,
           o.operation, o.attempts, o.max_attempts, o.lease_until, o.worker_id`
 
-	rows, err := r.db.Query(ctx, q, batchSize, leaseSeconds, workerID)
+	rows, err := r.db.Query(ctx, q, batchSize, leaseSeconds, workerID, entityTypes)
 	if err != nil {
 		return nil, fmt.Errorf("lease index events: %w", err)
 	}
@@ -218,7 +232,7 @@ SET status = CASE WHEN attempts >= max_attempts THEN 'DEAD' ELSE 'RETRY' END,
     updated_at = now()
 WHERE status = 'LEASED' AND lease_until < now()`
 
-	tag, err := r.db.Exec(ctx, q)
+	tag, err := r.db.Exec(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("requeue expired index leases: %w", err)
 	}
