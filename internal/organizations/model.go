@@ -19,6 +19,7 @@ var (
 	ErrInvalidBatch = errors.New("invalid organization import batch")
 	sourceKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 	categoryPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,95}$`)
+	cityPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,95}$`)
 )
 
 const maxRawPayloadBytes = 64 << 10
@@ -29,6 +30,7 @@ type SourceRow struct {
 	Phone          string   `json:"phone,omitempty"`
 	Website        string   `json:"website,omitempty"`
 	Address        string   `json:"address,omitempty"`
+	CityKey        string   `json:"city_key,omitempty"`
 	CategoryKey    string   `json:"category_key,omitempty"`
 	Latitude       *float64 `json:"latitude,omitempty"`
 	Longitude      *float64 `json:"longitude,omitempty"`
@@ -42,6 +44,7 @@ type NormalizedRow struct {
 	Website           string
 	Address           string
 	NormalizedAddress string
+	CityKey           string
 	CategoryKey       string
 	Latitude          *float64
 	Longitude         *float64
@@ -68,6 +71,8 @@ func NormalizeSourceRow(row SourceRow) (NormalizedRow, error) {
 	address := compactText(row.Address)
 	if utf8.RuneCountInString(address) > 700 { return NormalizedRow{}, ErrInvalidRow }
 	normalizedAddress := normalizeIdentityText(address)
+	city := strings.ToLower(strings.TrimSpace(row.CityKey))
+	if city != "" && !cityPattern.MatchString(city) { return NormalizedRow{}, ErrInvalidRow }
 	category := strings.ToLower(strings.TrimSpace(row.CategoryKey))
 	if category != "" && !categoryPattern.MatchString(category) { return NormalizedRow{}, ErrInvalidRow }
 	if (row.Latitude == nil) != (row.Longitude == nil) { return NormalizedRow{}, ErrInvalidRow }
@@ -79,16 +84,17 @@ func NormalizeSourceRow(row SourceRow) (NormalizedRow, error) {
 		Phone string `json:"phone,omitempty"`
 		Website string `json:"website,omitempty"`
 		Address string `json:"address,omitempty"`
+		CityKey string `json:"city_key,omitempty"`
 		CategoryKey string `json:"category_key,omitempty"`
 		Latitude *float64 `json:"latitude,omitempty"`
 		Longitude *float64 `json:"longitude,omitempty"`
-	}{row.SourceRecordID,row.Name,phone,website,address,category,row.Latitude,row.Longitude})
+	}{row.SourceRecordID,row.Name,phone,website,address,city,category,row.Latitude,row.Longitude})
 	if err != nil { return NormalizedRow{}, err }
 	sum := sha256.Sum256(canonical)
 	return NormalizedRow{
 		SourceRecordID: row.SourceRecordID, Name: row.Name, NormalizedName: normalizedName,
 		Phone: phone, Website: website, Address: address, NormalizedAddress: normalizedAddress,
-		CategoryKey: category, Latitude: row.Latitude, Longitude: row.Longitude,
+		CityKey: city, CategoryKey: category, Latitude: row.Latitude, Longitude: row.Longitude,
 		PayloadHash: hex.EncodeToString(sum[:]), RawPayload: rawPayload,
 	}, nil
 }
