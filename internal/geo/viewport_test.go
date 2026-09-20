@@ -16,7 +16,7 @@ func TestViewportRejectsInvalidBounds(t *testing.T){
 
 func TestViewportClustersNearbyPoints(t *testing.T){
 	fake:=&fakeBackend{result:backend.Result{Total:3,Hits:[]backend.Hit{
-		{ID:1,Name:"A",HasLocation:true,Latitude:55.7500,Longitude:37.6200,Status:""},
+		{ID:1,Name:"A",HasLocation:true,Latitude:55.7500,Longitude:37.6200},
 		{ID:2,Name:"B",HasLocation:true,Latitude:55.7502,Longitude:37.6202},
 		{ID:3,Name:"C",HasLocation:true,Latitude:55.90,Longitude:37.90},
 	}}}
