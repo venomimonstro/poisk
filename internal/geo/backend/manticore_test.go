@@ -14,9 +14,25 @@ func TestSearchBuildsServerSideFilters(t *testing.T){
 		if r.URL.Path!="/search"{t.Fatalf("path=%s",r.URL.Path)}
 		if err:=json.NewDecoder(r.Body).Decode(&payload);err!=nil{t.Fatal(err)}
 		w.Header().Set("Content-Type","application/json")
-		_,_=w.Write([]byte(`{"took":1,"timed_out":false,"hits":{"total":1,"hits":[{"_id":7,"_score":12,"_source":{"name":"Cafe","address":"Street","city_key":"moscow","category_key":"cafe","latitude":55.75,"longitude":37.62,"has_location":true,"quality_score":80,"source_count":2}}]}}`))
+		_,_=w.Write([]byte(`{"took":1}`))
 	}))
 	defer server.Close()
+
+	// Replace the response handler with valid JSON by creating the actual payload here.
+	server.Config.Handler=http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+		if r.URL.Path!="/search"{t.Fatalf("path=%s",r.URL.Path)}
+		if err:=json.NewDecoder(r.Body).Decode(&payload);err!=nil{t.Fatal(err)}
+		w.Header().Set("Content-Type","application/json")
+		response:=map[string]any{
+			"took":1,"timed_out":false,
+			"hits":map[string]any{"total":1,"hits":[]any{map[string]any{
+				"_id":7,"_score":12,
+				"_source":map[string]any{"name":"Cafe","address":"Street","city_key":"moscow","category_key":"cafe","latitude":55.75,"longitude":37.62,"has_location":true,"quality_score":80,"source_count":2},
+			}}},
+		}
+		_ = json.NewEncoder(w).Encode(response)
+	})
+
 	client,err:=New(Config{BaseURL:server.URL});if err!=nil{t.Fatal(err)}
 	lat,lon:=55.75,37.62
 	result,err:=client.Search(context.Background(),Query{Text:"coffee",CityKey:"moscow",CategoryKey:"cafe",Latitude:&lat,Longitude:&lon,RadiusMeters:3000,Limit:10})
@@ -34,7 +50,7 @@ func TestSearchCapsLimit(t *testing.T){
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 		limit = payload["limit"].(float64)
 		w.Header().Set("Content-Type","application/json")
-		_,_=w.Write([]byte(`{"took":0,"timed_out":false,"hits":{"total":0,"hits":[]}}`))
+		_ = json.NewEncoder(w).Encode(map[string]any{"took":0,"timed_out":false,"hits":map[string]any{"total":0,"hits":[]any{}}})
 	}))
 	defer server.Close()
 	client,err:=New(Config{BaseURL:server.URL,MaxResults:25});if err!=nil{t.Fatal(err)}
