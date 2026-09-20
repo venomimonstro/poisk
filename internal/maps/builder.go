@@ -34,7 +34,7 @@ func readPMTilesInfo(path string,size int64)(pmtilesInfo,error){
 		TileType:header[99],RootOffset:binary.LittleEndian.Uint64(header[8:16]),RootLength:binary.LittleEndian.Uint64(header[16:24]),
 		TileOffset:binary.LittleEndian.Uint64(header[56:64]),TileLength:binary.LittleEndian.Uint64(header[64:72]),
 	}
-	if info.TileType!=1 && info.TileType!=6{return pmtilesInfo{},ErrInvalidManifest}
+	if info.TileType!=1{return pmtilesInfo{},ErrInvalidManifest}
 	if info.MinZoom<0 || info.MaxZoom>24 || info.MinZoom>info.MaxZoom{return pmtilesInfo{},ErrInvalidManifest}
 	if info.RootOffset<pmtilesHeaderSize || info.RootLength==0 || info.RootOffset+info.RootLength<info.RootOffset || info.RootOffset+info.RootLength>pmtilesRootWindow{return pmtilesInfo{},ErrInvalidManifest}
 	if !rangeInside(uint64(size),info.RootOffset,info.RootLength) || !rangeInside(uint64(size),info.TileOffset,info.TileLength){return pmtilesInfo{},ErrInvalidManifest}
