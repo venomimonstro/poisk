@@ -66,6 +66,7 @@ WITH picked AS (
     WHERE status IN ('READY','RETRY')
       AND available_at <= now()
       AND attempts < max_attempts
+      AND COALESCE((SELECT value->>'state' FROM system_settings WHERE key='resource_pressure'),'NORMAL') <> 'CRITICAL'
     ORDER BY priority DESC, available_at ASC, id ASC
     FOR UPDATE SKIP LOCKED
     LIMIT $1
