@@ -167,6 +167,7 @@ func writeServiceError(w http.ResponseWriter,err error){
 	case errors.Is(err,webmaster.ErrUnauthorized): writeError(w,http.StatusUnauthorized,"unauthorized")
 	case errors.Is(err,webmaster.ErrNotFound): writeError(w,http.StatusNotFound,"not_found")
 	case errors.Is(err,webmaster.ErrNotVerified): writeError(w,http.StatusForbidden,"site_not_verified")
+	case errors.Is(err,webmaster.ErrSiteBlocked): writeError(w,http.StatusForbidden,"site_blocked")
 	case errors.Is(err,webmaster.ErrConflict): writeError(w,http.StatusConflict,"conflict")
 	case errors.Is(err,webmaster.ErrInvalidInput),errors.Is(err,webmaster.ErrInvalidSiteOrigin),errors.Is(err,webmaster.ErrVerificationFailed),errors.Is(err,wmauth.ErrWeakPassword): writeError(w,http.StatusBadRequest,"invalid_request")
 	case errors.Is(err,context.DeadlineExceeded),errors.Is(err,context.Canceled): writeError(w,http.StatusGatewayTimeout,"timeout")
