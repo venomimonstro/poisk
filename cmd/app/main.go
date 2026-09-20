@@ -71,10 +71,14 @@ func run() error {
 		return runOrganizationsWorker(pool)
 	case "organization-indexer":
 		return runOrganizationIndexer(cfg, pool)
+	case "address-indexer":
+		return runAddressIndexer(cfg, pool)
 	case "mapctl":
 		return runMapCtl(ctx, pool, os.Args[2:])
 	case "orgctl":
 		return runOrgCtl(ctx, pool, os.Args[2:])
+	case "addressctl":
+		return runAddressCtl(ctx, cfg, pool, os.Args[2:])
 	case "quality":
 		return runQuality(cfg)
 	default:
@@ -125,6 +129,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	router.With(apiGuard.Protect).Post("/api/click", trackingHandler.Click)
 	router.Mount("/api/webmaster", apiGuard.Protect(webmasterHandler.Routes()))
 	if err:=registerGeoRoute(router,apiGuard,cfg);err!=nil{return err}
+	if err:=registerAddressRoutes(router,apiGuard,cfg,pool);err!=nil{return err}
 
 	server := &http.Server{Addr:cfg.Addr,Handler:router,ReadHeaderTimeout:3*time.Second,ReadTimeout:5*time.Second,WriteTimeout:5*time.Second,IdleTimeout:60*time.Second}
 	serverErr := make(chan error, 1)
