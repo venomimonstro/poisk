@@ -28,7 +28,7 @@ func organizationActor()string{
 }
 
 func runOrgCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
-	if len(args)==0{return errors.New("usage: orgctl source|import|plan|review|promote|status|rebuild-index")}
+	if len(args)==0{return errors.New("usage: orgctl source|import|plan|review|promote|status|rebuild-index|match-web")}
 	repo:=organizations.NewRepository(pool)
 	switch args[0]{
 	case "source":
@@ -86,6 +86,18 @@ func runOrgCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
 	case "rebuild-index":
 		if len(args)!=1{return errors.New("usage: orgctl rebuild-index")}
 		return rebuildOrganizationIndex(ctx,pool)
+	case "match-web":
+		if len(args)>2{return errors.New("usage: orgctl match-web [after-place-id]")}
+		var after int64
+		if len(args)==2{value,err:=strconv.ParseInt(args[1],10,64);if err!=nil||value<0{return errors.New("invalid after-place-id")};after=value}
+		total:=organizations.WebMatchStats{}
+		for{
+			stats,cursor,err:=repo.MatchWebBatch(ctx,after,200);if err!=nil{return err}
+			total.Organizations+=stats.Organizations;total.WebsiteLinks+=stats.WebsiteLinks;total.SchemaLinks+=stats.SchemaLinks
+			if stats.Organizations==0||cursor==after{break};after=cursor
+			if ctx.Err()!=nil{return ctx.Err()}
+		}
+		return json.NewEncoder(os.Stdout).Encode(total)
 	default:return fmt.Errorf("unknown orgctl command %q",args[0])
 	}
 }
