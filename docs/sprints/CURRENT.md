@@ -1,10 +1,10 @@
 # CURRENT SPRINT
 
-**Sprint:** 11 — Webmaster Free
+**Sprint:** 12 — Maps
 **Status:** IN_PROGRESS
 
 ## Goal
-Собрать бесплатный Webmaster-контур, который позволяет владельцу сайта зарегистрироваться, подтвердить владение доменом, добавить sitemap/URL, запросить удаление или переиндексацию, видеть индексный статус и базовую диагностику, а также получать агрегированные показы/клики/Answer citations.
+Добавить независимый картографический слой на базе OSM/PMTiles/MapLibre: versioned map artifacts, безопасный manifest, runtime map configuration, frontend map rendering и rollback без зависимости от GEO/organizations следующих спринтов.
 
 ## Depends On
 - Sprint 00 — PASS
@@ -18,42 +18,43 @@
 - Sprint 08 — PASS
 - Sprint 09 — PASS (code/static gate)
 - Sprint 10 — PASS (code/static gate)
+- Sprint 11 — PASS (code/static gate)
 
 ## Allowed Work
-- local account/session authentication for Webmaster
-- password hashing and session lifecycle
-- site registration and canonical host validation
-- ownership verification tokens
-- DNS TXT / HTML file / meta-tag verification contracts
-- sitemap submission
-- URL submit/reindex/delete requests
-- index status and crawl diagnostics
-- aggregate impressions/clicks/CTR
-- Answer citation counters
-- Webmaster API and basic UI
-- audit events for sensitive Webmaster actions
-- bounded validation/rate limits using existing platform primitives
+- OSM attribution and map source policy
+- PMTiles artifact manifest and immutable versions
+- active map version pointer
+- rollback to previous validated version
+- map file integrity metadata (size/hash/version)
+- bounded map manifest API
+- MapLibre frontend integration
+- PMTiles protocol integration
+- simple map screen and viewport state
+- static/self-hosted map style configuration
+- validation tests for manifests/version switching/rollback
+- deployment paths for immutable map artifacts
 
 ## Forbidden Work
-- paid Webmaster/Agency billing
-- Maps/GEO/organizations
+- organization import
+- GEO search or nearby ranking
+- business cards/claiming
+- FIAS/GAR geocoding
+- paid map APIs required for core rendering
+- arbitrary remote tile proxying
+- runtime mutation of immutable PMTiles files
 - Redis/Kafka/RabbitMQ
-- external identity provider dependency required for core login
-- arbitrary remote file fetching that bypasses crawler SSRF policy
-- ranking manipulation controls sold to webmasters
 - GitHub Actions/CI
 
 ## Definition of Done
-- [ ] user can register/login/logout with bounded sessions
-- [ ] passwords are stored only as strong hashes
-- [ ] site can be added only as a canonical public HTTP(S) origin
-- [ ] ownership verification is replay-safe and auditable
-- [ ] verified owner can submit sitemap and individual URLs
-- [ ] verified owner can request reindex/delete without directly mutating Manticore
-- [ ] URL/index status and diagnostic reason are queryable
-- [ ] impressions/clicks/CTR aggregation contract exists
-- [ ] Answer citation aggregation contract exists
-- [ ] one user cannot access another user's sites
-- [ ] validation/security tests cover auth, ownership and cross-tenant isolation
+- [ ] map artifacts are immutable and version identified
+- [ ] active version is stored separately from artifacts
+- [ ] manifest validates path/hash/size/bounds/version
+- [ ] map config API exposes only validated active artifact metadata
+- [ ] rollback can atomically switch to a prior validated version
+- [ ] MapLibre renders the configured PMTiles source
+- [ ] OSM attribution is visible
+- [ ] missing/corrupt active version fails safely
+- [ ] tests cover manifest validation, activation and rollback rules
+- [ ] no GEO/organization scope is pulled into Sprint 12
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 11 report created
+- [ ] Sprint 12 report created
