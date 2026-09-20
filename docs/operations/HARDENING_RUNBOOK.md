@@ -78,27 +78,28 @@ docker compose --profile ops run --rm restore
 
 The restore script validates checksums and the PostgreSQL custom archive before any database mutation. `--clean --if-exists` is used only when `RESTORE_ALLOW_NONEMPTY=yes` exactly.
 
-After restore, rebuild disposable indexes:
+After restore, rebuild all disposable Manticore indexes from PostgreSQL canonical data:
 
 ```bash
-docker compose run --rm backend addressctl rebuild-index
+docker compose run --rm backend indexctl rebuild-web
 docker compose run --rm backend orgctl rebuild-index
-docker compose run --rm backend indexer-rebuild
+docker compose run --rm backend addressctl rebuild-index
 ```
 
-If the web rebuild command name changes, use the current Sprint 06 rebuild command documented with the indexer. Never restore stale Manticore files over restored PostgreSQL canonical data.
+Never restore stale Manticore files over restored PostgreSQL canonical data.
 
 ## Release staging
 
-Build and publish immutable backend/frontend images first. Prefer registry digest references.
+Build and publish immutable backend/frontend images first. Prefer registry digest references. Stage the manifest using the candidate backend image so the stored index-schema constants come from the candidate binary, not the currently active binary.
 
-Stage a release:
+Example:
 
 ```bash
+BACKEND_IMAGE=registry.example/poisk/backend@sha256:<candidate-digest> \
 docker compose run --rm backend releasectl stage \
   2026.09.20 <git-sha> 19 <map-version-or-dash> <config-sha256> \
-  registry.example/poisk/backend@sha256:<digest> \
-  registry.example/poisk/frontend@sha256:<digest>
+  registry.example/poisk/backend@sha256:<candidate-digest> \
+  registry.example/poisk/frontend@sha256:<candidate-digest>
 ```
 
 Release fields are restricted to shell-safe formats because the registry can export image variables to the deployment scripts.
@@ -136,7 +137,7 @@ At least before a production milestone:
 3. Start an isolated PostgreSQL/PostGIS target with a separate volume/database.
 4. Restore the archive into that isolated target.
 5. Verify `schema_migrations`, domains, URLs, organizations and addresses.
-6. Point a temporary backend/indexer at the restored target and rebuild all disposable indexes.
+6. Point a temporary backend/indexer at the restored target and rebuild all disposable indexes with the three commands above.
 7. Verify `/health/ready`, Web Search, one GEO query and one address query.
 8. Destroy the isolated restore environment.
 
