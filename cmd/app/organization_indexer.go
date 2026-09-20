@@ -15,12 +15,6 @@ import (
 	"github.com/venomimonstro/poisk/internal/platform/config"
 )
 
-func runOrganizationsWorker(pool *pgxpool.Pool) error {
-	cfg, err := config.Load()
-	if err != nil { return err }
-	return runOrganizationIndexer(cfg, pool)
-}
-
 func runOrganizationIndexer(cfg config.Config, pool *pgxpool.Pool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
