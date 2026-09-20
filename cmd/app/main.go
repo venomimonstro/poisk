@@ -18,6 +18,8 @@ import (
 
 	answersvc "github.com/venomimonstro/poisk/internal/answer"
 	answerhttp "github.com/venomimonstro/poisk/internal/answer/httpapi"
+	crawlerfetcher "github.com/venomimonstro/poisk/internal/crawler/fetcher"
+	crawlersecurity "github.com/venomimonstro/poisk/internal/crawler/security"
 	indexmanticore "github.com/venomimonstro/poisk/internal/indexer/manticore"
 	"github.com/venomimonstro/poisk/internal/indexer/outbox"
 	"github.com/venomimonstro/poisk/internal/indexer/source"
@@ -31,6 +33,8 @@ import (
 	searchsvc "github.com/venomimonstro/poisk/internal/search"
 	searchbackend "github.com/venomimonstro/poisk/internal/search/backend"
 	searchhttp "github.com/venomimonstro/poisk/internal/search/httpapi"
+	"github.com/venomimonstro/poisk/internal/webmaster"
+	webmasterhttp "github.com/venomimonstro/poisk/internal/webmaster/httpapi"
 )
 
 func main() {
@@ -43,18 +47,14 @@ func main() {
 func run() error {
 	cfg, err := config.Load()
 	if err != nil { return err }
-
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
-
 	mode := "api"
 	if len(os.Args) > 1 { mode = os.Args[1] }
-
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, cfg.PostgresDSN)
 	if err != nil { return fmt.Errorf("create postgres pool: %w", err) }
 	defer pool.Close()
-
 	switch mode {
 	case "migrate":
 		if err := migrate.Up(ctx, pool, cfg.MigrationsDir); err != nil { return err }
@@ -76,14 +76,30 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 
 	searchBackend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create search backend: %w", err) }
-	searchService := &searchsvc.Service{
-		Backend: searchBackend,
-		Cache: searchsvc.NewCache(512),
-		BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent),
-	}
+	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512), BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent)}
 	searchHandler := searchhttp.Handler{SearchService: searchService}
 	answerService := &answersvc.Service{Search: searchService, MinConfidence: answersvc.DefaultMinConfidence}
 	answerHandler := answerhttp.Handler{AnswerService: answerService}
+
+	validator := crawlersecurity.NewValidator()
+	proofCfg := crawlerfetcher.DefaultConfig()
+	proofCfg.UserAgent = "PoiskWebmasterVerifier/1.0"
+	proofCfg.MaxBodyBytes = 256 << 10
+	proofCfg.MaxRedirects = 3
+	proofCfg.MaxRetries = 1
+	proofCfg.RequestTimeout = 5 * time.Second
+	proofCfg.ResponseHeaderTimeout = 3 * time.Second
+	proofFetcher := crawlerfetcher.New(proofCfg, validator)
+	defer proofFetcher.CloseIdleConnections()
+	webmasterRepo := webmaster.NewRepository(pool)
+	webmasterService := &webmaster.Service{
+		Store: webmasterRepo,
+		Validator: validator,
+		Verifier: webmaster.Verifier{Fetcher: proofFetcher},
+		SessionTTL: 7 * 24 * time.Hour,
+		VerificationTTL: 30 * time.Minute,
+	}
+	webmasterHandler := webmasterhttp.Handler{Service: webmasterService}
 
 	latencyRecorder := platformmetrics.NewLatencyRecorder(4096)
 	apiLimiter := guard.NewLimiter(cfg.APIRatePerSecond, cfg.APIRateBurst, cfg.APIRateClients, cfg.APIRateIdleTTL)
@@ -99,32 +115,17 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	router.Get("/health/perf", perfHandler(latencyRecorder))
 	router.With(apiGuard.Protect).Get("/api/search", searchHandler.Search)
 	router.With(apiGuard.Protect).Get("/api/answer", answerHandler.Answer)
+	router.Mount("/api/webmaster", apiGuard.Protect(webmasterHandler.Routes()))
 
-	server := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           router,
-		ReadHeaderTimeout: 3 * time.Second,
-		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      5 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-
+	server := &http.Server{Addr:cfg.Addr,Handler:router,ReadHeaderTimeout:3*time.Second,ReadTimeout:5*time.Second,WriteTimeout:5*time.Second,IdleTimeout:60*time.Second}
 	serverErr := make(chan error, 1)
-	go func() {
-		slog.Info("http server started", "addr", cfg.Addr, "env", cfg.Env, "mode", "api")
-		serverErr <- server.ListenAndServe()
-	}()
-
+	go func() { slog.Info("http server started", "addr", cfg.Addr, "env", cfg.Env, "mode", "api"); serverErr <- server.ListenAndServe() }()
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
 	select {
-	case <-sigCtx.Done():
-		slog.Info("shutdown signal received")
-	case err := <-serverErr:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) { return err }
+	case <-sigCtx.Done(): slog.Info("shutdown signal received")
+	case err := <-serverErr: if err != nil && !errors.Is(err, http.ErrServerClosed) { return err }
 	}
-
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	return server.Shutdown(shutdownCtx)
@@ -135,40 +136,20 @@ func perfHandler(recorder *platformmetrics.LatencyRecorder) http.HandlerFunc {
 		s := recorder.Snapshot()
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"count": s.Count,
-			"p50_ms": float64(s.P50.Microseconds()) / 1000,
-			"p95_ms": float64(s.P95.Microseconds()) / 1000,
-			"p99_ms": float64(s.P99.Microseconds()) / 1000,
-		})
+		_ = json.NewEncoder(w).Encode(map[string]any{"count":s.Count,"p50_ms":float64(s.P50.Microseconds())/1000,"p95_ms":float64(s.P95.Microseconds())/1000,"p99_ms":float64(s.P99.Microseconds())/1000})
 	}
 }
 
 func runIndexer(cfg config.Config, pool *pgxpool.Pool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
 	index, err := indexmanticore.New(indexmanticore.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create manticore index client: %w", err) }
 	if err := index.EnsureSchema(ctx); err != nil { return fmt.Errorf("ensure web index schema: %w", err) }
-
 	outboxRepo := outbox.NewRepository(pool)
 	sourceRepo := source.NewRepository(pool)
-	processor := &indexworker.Processor{
-		Source: sourceRepo,
-		Index: index,
-		Ack: outboxRepo,
-		RetryBase: time.Second,
-		RetryMax: time.Minute,
-	}
-	runner := indexworker.Runner{
-		Leases: outboxRepo,
-		Processor: processor,
-		WorkerID: fmt.Sprintf("indexer-%d", os.Getpid()),
-		BatchSize: 32,
-		LeaseSeconds: 30,
-		PollInterval: 500 * time.Millisecond,
-	}
+	processor := &indexworker.Processor{Source:sourceRepo,Index:index,Ack:outboxRepo,RetryBase:time.Second,RetryMax:time.Minute}
+	runner := indexworker.Runner{Leases:outboxRepo,Processor:processor,WorkerID:fmt.Sprintf("indexer-%d",os.Getpid()),BatchSize:32,LeaseSeconds:30,PollInterval:500*time.Millisecond}
 	slog.Info("indexer worker started", "worker_id", runner.WorkerID)
 	return runner.Run(ctx)
 }
@@ -178,35 +159,26 @@ func runQuality(cfg config.Config) error {
 	if goldenPath == "" { goldenPath = "/app/docs/quality/golden.seed.json" }
 	thresholdPath := os.Getenv("QUALITY_THRESHOLDS_PATH")
 	if thresholdPath == "" { thresholdPath = "/app/docs/quality/thresholds.json" }
-
 	goldenFile, err := os.Open(goldenPath)
 	if err != nil { return fmt.Errorf("open golden set: %w", err) }
 	defer goldenFile.Close()
 	golden, err := quality.LoadGolden(goldenFile)
 	if err != nil { return err }
-
 	thresholdFile, err := os.Open(thresholdPath)
 	if err != nil { return fmt.Errorf("open quality thresholds: %w", err) }
 	defer thresholdFile.Close()
 	thresholds, err := quality.LoadThresholds(thresholdFile)
 	if err != nil { return err }
-
 	backend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create quality search backend: %w", err) }
 	service := &searchsvc.Service{Backend: backend, BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent)}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	report, err := quality.EvaluateGolden(ctx, service, golden)
 	if err != nil { return err }
 	gate := quality.CheckGate(report.Summary, thresholds)
-	output := struct {
-		Report     quality.Report     `json:"report"`
-		Thresholds quality.Thresholds `json:"thresholds"`
-		Gate       quality.GateResult `json:"gate"`
-	}{Report: report, Thresholds: thresholds, Gate: gate}
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
+	output := struct { Report quality.Report `json:"report"`; Thresholds quality.Thresholds `json:"thresholds"`; Gate quality.GateResult `json:"gate"` }{Report:report,Thresholds:thresholds,Gate:gate}
+	encoder := json.NewEncoder(os.Stdout); encoder.SetIndent("", "  ")
 	if err := encoder.Encode(output); err != nil { return fmt.Errorf("encode quality report: %w", err) }
 	if !gate.Pass { return errors.New("search quality gate failed") }
 	return nil
