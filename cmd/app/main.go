@@ -75,12 +75,14 @@ func run() error {
 
 func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	checker := health.Checker{DB: pool, ManticoreHost: cfg.ManticoreHost, ManticoreSQLPort: cfg.ManticoreSQLPort}
+	webmasterRepo := webmaster.NewRepository(pool)
 	searchBackend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create search backend: %w", err) }
 	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512), BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent)}
-	searchHandler := searchhttp.Handler{SearchService: searchService}
+	searchHandler := searchhttp.Handler{SearchService: searchService, Impressions: webmasterRepo}
 	answerService := &answersvc.Service{Search: searchService, MinConfidence: answersvc.DefaultMinConfidence}
-	answerHandler := answerhttp.Handler{AnswerService: answerService}
+	answerHandler := answerhttp.Handler{AnswerService: answerService, Citations: webmasterRepo}
+	trackingHandler := webmasterhttp.TrackingHandler{Recorder: webmasterRepo}
 
 	validator := crawlersecurity.NewValidator()
 	proofCfg := crawlerfetcher.DefaultConfig()
@@ -92,7 +94,6 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	proofCfg.ResponseHeaderTimeout = 3 * time.Second
 	proofFetcher := crawlerfetcher.New(proofCfg, validator)
 	defer proofFetcher.CloseIdleConnections()
-	webmasterRepo := webmaster.NewRepository(pool)
 	webmasterService := &webmaster.Service{Store:webmasterRepo,Validator:validator,Verifier:webmaster.Verifier{Fetcher:proofFetcher},SessionTTL:7*24*time.Hour,VerificationTTL:30*time.Minute}
 	webmasterHandler := webmasterhttp.Handler{Service:webmasterService}
 
@@ -110,6 +111,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	router.Get("/health/perf", perfHandler(latencyRecorder))
 	router.With(apiGuard.Protect).Get("/api/search", searchHandler.Search)
 	router.With(apiGuard.Protect).Get("/api/answer", answerHandler.Answer)
+	router.With(apiGuard.Protect).Post("/api/click", trackingHandler.Click)
 	router.Mount("/api/webmaster", apiGuard.Protect(webmasterHandler.Routes()))
 
 	server := &http.Server{Addr:cfg.Addr,Handler:router,ReadHeaderTimeout:3*time.Second,ReadTimeout:5*time.Second,WriteTimeout:5*time.Second,IdleTimeout:60*time.Second}
