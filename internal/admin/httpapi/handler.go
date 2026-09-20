@@ -30,6 +30,8 @@ func (h Handler) Routes()http.Handler{
 		protected.Get("/me",h.Me)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","SUPPORT")).Get("/status",h.Status)
 		protected.With(h.requireCSRF).Post("/logout",h.Logout)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/domains/preview",h.DomainPreview)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/domains/apply",h.DomainApply)
 	})
 	return r
 }
