@@ -91,7 +91,7 @@ func (s *Service) AddSite(ctx context.Context,userID int64,rawOrigin string)(Sit
 }
 
 func (s *Service) BeginVerification(ctx context.Context,userID,siteID int64,method string)(VerificationChallenge,error){
-	if method!=VerificationDNS && method!=VerificationFile && method!=VerificationMeta { return VerificationChallenge{},ErrVerificationFailed }
+	if method!=VerificationDNS && method!=VerificationFile && method!=VerificationMeta { return VerificationChallenge{},ErrInvalidInput }
 	if _,err:=s.Store.OwnedSite(ctx,userID,siteID,false); err!=nil { return VerificationChallenge{},err }
 	token,hash,err:=wmauth.NewOpaqueToken(); if err!=nil { return VerificationChallenge{},err }
 	ttl:=s.VerificationTTL; if ttl<=0 { ttl=30*time.Minute }
@@ -101,6 +101,8 @@ func (s *Service) BeginVerification(ctx context.Context,userID,siteID int64,meth
 }
 
 func (s *Service) CompleteVerification(ctx context.Context,userID,siteID int64,method,token string) error {
+	if method!=VerificationDNS && method!=VerificationFile && method!=VerificationMeta { return ErrInvalidInput }
+	if strings.TrimSpace(token)=="" { return ErrInvalidInput }
 	site,err:=s.Store.OwnedSite(ctx,userID,siteID,false); if err!=nil { return err }
 	if err:=s.Verifier.Verify(ctx,site,method,token); err!=nil { return err }
 	hash,err:=wmauth.HashToken(token); if err!=nil { return err }
@@ -110,22 +112,22 @@ func (s *Service) CompleteVerification(ctx context.Context,userID,siteID int64,m
 func (s *Service) SubmitSitemap(ctx context.Context,userID,siteID int64,raw string)(int64,error){
 	site,err:=s.Store.OwnedSite(ctx,userID,siteID,true); if err!=nil { return 0,err }
 	target,err:=s.Validator.Validate(ctx,raw); if err!=nil || !sameSiteHost(target.Host,site.Host) { return 0,ErrInvalidSiteOrigin }
-	normalized,err:=urlnorm.Normalize(raw); if err!=nil { return 0,err }
+	normalized,err:=urlnorm.Normalize(raw); if err!=nil { return 0,ErrInvalidInput }
 	return s.Store.SubmitSitemap(ctx,userID,siteID,normalized)
 }
 
 func (s *Service) SubmitURL(ctx context.Context,userID,siteID int64,raw,operation string)(int64,error){
 	operation=strings.ToUpper(strings.TrimSpace(operation))
-	if operation!="SUBMIT" && operation!="REINDEX" && operation!="DELETE" { return 0,errors.New("invalid URL operation") }
+	if operation!="SUBMIT" && operation!="REINDEX" && operation!="DELETE" { return 0,ErrInvalidInput }
 	site,err:=s.Store.OwnedSite(ctx,userID,siteID,true); if err!=nil { return 0,err }
 	target,err:=s.Validator.Validate(ctx,raw); if err!=nil || !sameSiteHost(target.Host,site.Host) { return 0,ErrInvalidSiteOrigin }
-	normalized,err:=urlnorm.Normalize(raw); if err!=nil { return 0,err }
+	normalized,err:=urlnorm.Normalize(raw); if err!=nil { return 0,ErrInvalidInput }
 	return s.Store.QueueURLRequest(ctx,userID,siteID,normalized,operation)
 }
 
 func (s *Service) URLStatus(ctx context.Context,userID,siteID int64,raw string)(URLStatus,error){
 	if _,err:=s.Store.OwnedSite(ctx,userID,siteID,false); err!=nil { return URLStatus{},err }
-	normalized,err:=urlnorm.Normalize(raw); if err!=nil { return URLStatus{},err }
+	normalized,err:=urlnorm.Normalize(raw); if err!=nil { return URLStatus{},ErrInvalidInput }
 	return s.Store.URLStatus(ctx,userID,siteID,normalized)
 }
 
@@ -133,7 +135,7 @@ func (s *Service) Metrics(ctx context.Context,userID,siteID int64,from,to time.T
 	if _,err:=s.Store.OwnedSite(ctx,userID,siteID,false); err!=nil { return Metrics{},err }
 	if from.IsZero() { from=time.Now().UTC().AddDate(0,0,-30) }
 	if to.IsZero() { to=time.Now().UTC() }
-	if to.Before(from) || to.Sub(from)>366*24*time.Hour { return Metrics{},errors.New("invalid metrics range") }
+	if to.Before(from) || to.Sub(from)>366*24*time.Hour { return Metrics{},ErrInvalidInput }
 	return s.Store.Metrics(ctx,userID,siteID,from,to)
 }
 
@@ -147,8 +149,8 @@ func (s *Service) newSession(ctx context.Context,user User)(Session,error){
 
 func normalizeEmail(raw string)(string,error){
 	email:=strings.ToLower(strings.TrimSpace(raw))
-	if len(email)<3 || len(email)>254 { return "",errors.New("invalid email") }
-	addr,err:=mail.ParseAddress(email); if err!=nil || strings.ToLower(addr.Address)!=email { return "",errors.New("invalid email") }
+	if len(email)<3 || len(email)>254 { return "",ErrInvalidInput }
+	addr,err:=mail.ParseAddress(email); if err!=nil || strings.ToLower(addr.Address)!=email { return "",ErrInvalidInput }
 	return email,nil
 }
 
