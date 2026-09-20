@@ -11,13 +11,14 @@ import (
 
 type ResolveResult struct {
 	Applied  int64 `json:"applied"`
+	Ignored  int64 `json:"ignored"`
 	Orphans  int64 `json:"orphans"`
 	Passes   int   `json:"passes"`
 }
 
 // ResolveBatch builds the canonical hierarchy only from staged GAR rows.
-// A row is applied when its parent is either absent (root) or already canonical.
-// Remaining rows after a no-progress pass are treated as orphan/cycle diagnostics.
+// Inactive/history rows are IGNORED. Active rows whose parent cannot be
+// resolved after bounded passes become ORPHAN diagnostics, never partial canonicals.
 func (r *Repository) ResolveBatch(ctx context.Context,batchID int64)(ResolveResult,error){
 	if r==nil||r.db==nil{return ResolveResult{},errors.New("address repository is not initialized")}
 	if batchID<=0{return ResolveResult{},ErrBatchConflict}
@@ -28,6 +29,9 @@ func (r *Repository) ResolveBatch(ctx context.Context,batchID int64)(ResolveResu
 		if err!=nil{return ResolveResult{},err};if tag.RowsAffected()!=1{return ResolveResult{},ErrBatchConflict}
 	}
 	result:=ResolveResult{}
+	ignoredTag,err:=r.db.Exec(ctx,`UPDATE address_staging_rows SET state='IGNORED',updated_at=now()
+WHERE batch_id=$1 AND state='VALID' AND record_kind IN ('ADDR_OBJ','HOUSE') AND (COALESCE(is_actual,TRUE)=FALSE OR COALESCE(is_active,TRUE)=FALSE)`,batchID)
+	if err!=nil{return result,err};result.Ignored=ignoredTag.RowsAffected()
 	for pass:=1;pass<=128;pass++{
 		if err:=ctx.Err();err!=nil{return result,err}
 		applied,err:=r.resolvePass(ctx,batchID,batch.SourceRevision)
@@ -35,17 +39,17 @@ func (r *Repository) ResolveBatch(ctx context.Context,batchID int64)(ResolveResu
 		result.Passes=pass;result.Applied+=applied
 		if applied==0{break}
 	}
-	var remaining int64
-	if err:=r.db.QueryRow(ctx,`SELECT count(*) FROM address_staging_rows WHERE batch_id=$1 AND state='VALID' AND record_kind IN ('ADDR_OBJ','HOUSE')`,batchID).Scan(&remaining);err!=nil{return result,err}
-	result.Orphans=remaining
-	if remaining>0{
+	orphanTag,err:=r.db.Exec(ctx,`UPDATE address_staging_rows SET state='ORPHAN',updated_at=now()
+WHERE batch_id=$1 AND state='VALID' AND record_kind IN ('ADDR_OBJ','HOUSE')`,batchID)
+	if err!=nil{return result,err};result.Orphans=orphanTag.RowsAffected()
+	if result.Orphans>0{
 		_,err:=r.db.Exec(ctx,`INSERT INTO address_import_events(batch_id,action,details)
-VALUES($1,'ORPHAN_SUMMARY',jsonb_build_object('remaining',$2))`,batchID,remaining)
+VALUES($1,'ORPHAN_SUMMARY',jsonb_build_object('remaining',$2))`,batchID,result.Orphans)
 		if err!=nil{return result,err}
 	}
 	_,err=r.db.Exec(ctx,`UPDATE address_import_batches SET status='DONE',applied_count=(SELECT count(*) FROM address_staging_rows WHERE batch_id=$1 AND state='APPLIED'),
  rejected_count=(SELECT count(*) FROM address_import_rejections WHERE batch_id=$1)+$2,updated_at=now(),last_error=CASE WHEN $2>0 THEN 'orphan_or_cycle_rows' ELSE NULL END
-WHERE batch_id=$1 AND status='APPLYING'`,batchID,remaining)
+WHERE batch_id=$1 AND status='APPLYING'`,batchID,result.Orphans)
 	if err!=nil{return result,err}
 	return result,nil
 }
@@ -61,7 +65,6 @@ WITH candidates AS (
  LEFT JOIN address_staging_rows h ON h.batch_id=s.batch_id AND h.record_kind='HIERARCHY' AND h.region_code=s.region_code AND h.object_id=s.object_id AND h.state='VALID'
  LEFT JOIN addresses p ON p.region_code=s.region_code AND p.gar_object_id=h.parent_object_id
  WHERE s.batch_id=$1 AND s.state='VALID' AND s.record_kind IN ('ADDR_OBJ','HOUSE')
-   AND COALESCE(s.is_actual,TRUE)=TRUE AND COALESCE(s.is_active,TRUE)=TRUE
    AND (h.parent_object_id IS NULL OR p.address_id IS NOT NULL)
  ORDER BY CASE WHEN s.record_kind='ADDR_OBJ' THEN 0 ELSE 1 END,s.level NULLS FIRST,s.staging_id
  LIMIT 5000
