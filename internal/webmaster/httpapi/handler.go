@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -38,9 +39,15 @@ func (h Handler) Routes() http.Handler {
 	return r
 }
 
+func (h Handler) available(w http.ResponseWriter) bool {
+	if h.Service!=nil { return true }
+	writeError(w,http.StatusServiceUnavailable,"webmaster_unavailable")
+	return false
+}
+
 func (h Handler) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-		if h.Service==nil { writeError(w,http.StatusServiceUnavailable,"webmaster_unavailable"); return }
+		if !h.available(w) { return }
 		token:=bearerToken(r.Header.Get("Authorization"))
 		if token=="" { writeError(w,http.StatusUnauthorized,"unauthorized"); return }
 		user,err:=h.Service.Authenticate(r.Context(),token)
@@ -51,6 +58,7 @@ func (h Handler) RequireAuth(next http.Handler) http.Handler {
 }
 
 func (h Handler) Register(w http.ResponseWriter,r *http.Request){
+	if !h.available(w) { return }
 	var in struct{ Email string `json:"email"`; Password string `json:"password"` }
 	if !decodeJSON(w,r,&in) { return }
 	out,err:=h.Service.Register(r.Context(),in.Email,in.Password)
@@ -59,6 +67,7 @@ func (h Handler) Register(w http.ResponseWriter,r *http.Request){
 }
 
 func (h Handler) Login(w http.ResponseWriter,r *http.Request){
+	if !h.available(w) { return }
 	var in struct{ Email string `json:"email"`; Password string `json:"password"` }
 	if !decodeJSON(w,r,&in) { return }
 	out,err:=h.Service.Login(r.Context(),in.Email,in.Password)
@@ -74,7 +83,7 @@ func (h Handler) Logout(w http.ResponseWriter,r *http.Request){
 
 func (h Handler) ListSites(w http.ResponseWriter,r *http.Request){
 	user,_:=currentUser(r)
-	sites,err:=h.Service.Store.ListSites(r.Context(),user.ID)
+	sites,err:=h.Service.Sites(r.Context(),user.ID)
 	if err!=nil { writeServiceError(w,err); return }
 	writeJSON(w,http.StatusOK,map[string]any{"sites":sites})
 }
@@ -148,6 +157,8 @@ func decodeJSON(w http.ResponseWriter,r *http.Request,dst any) bool {
 	r.Body=http.MaxBytesReader(w,r.Body,64<<10)
 	dec:=json.NewDecoder(r.Body); dec.DisallowUnknownFields()
 	if err:=dec.Decode(dst); err!=nil { writeError(w,http.StatusBadRequest,"invalid_json"); return false }
+	var extra any
+	if err:=dec.Decode(&extra); err!=io.EOF { writeError(w,http.StatusBadRequest,"invalid_json"); return false }
 	return true
 }
 
@@ -157,7 +168,7 @@ func writeServiceError(w http.ResponseWriter,err error){
 	case errors.Is(err,webmaster.ErrNotFound): writeError(w,http.StatusNotFound,"not_found")
 	case errors.Is(err,webmaster.ErrNotVerified): writeError(w,http.StatusForbidden,"site_not_verified")
 	case errors.Is(err,webmaster.ErrConflict): writeError(w,http.StatusConflict,"conflict")
-	case errors.Is(err,webmaster.ErrInvalidSiteOrigin),errors.Is(err,webmaster.ErrVerificationFailed),errors.Is(err,wmauth.ErrWeakPassword): writeError(w,http.StatusBadRequest,"invalid_request")
+	case errors.Is(err,webmaster.ErrInvalidInput),errors.Is(err,webmaster.ErrInvalidSiteOrigin),errors.Is(err,webmaster.ErrVerificationFailed),errors.Is(err,wmauth.ErrWeakPassword): writeError(w,http.StatusBadRequest,"invalid_request")
 	case errors.Is(err,context.DeadlineExceeded),errors.Is(err,context.Canceled): writeError(w,http.StatusGatewayTimeout,"timeout")
 	default: writeError(w,http.StatusInternalServerError,"webmaster_error")
 	}
