@@ -94,3 +94,33 @@ func TestManifestRejectsTraversalAndRemoteStyleDependencies(t *testing.T){
 	h:=sha256.Sum256(style);m.StyleSHA256=hex.EncodeToString(h[:]);m.StyleSize=int64(len(style))
 	if err:=ValidateFiles(root,m);err==nil{t.Fatal("remote style dependency accepted")}
 }
+
+func TestManifestRejectsHTMLAttribution(t *testing.T){
+	_,m:=writeMapFixture(t)
+	m.AttributionHTML=`<img src=x onerror=alert(1)>`
+	if err:=m.Validate();err==nil{t.Fatal("HTML attribution accepted")}
+}
+
+func TestValidateStyleRejectsAdditionalSource(t *testing.T){
+	root,m:=writeMapFixture(t)
+	style:=map[string]any{
+		"version":8,
+		"sources":map[string]any{
+			"osm":map[string]any{"type":"vector","url":"pmtiles:///maps/tiles/ru-v1.pmtiles"},
+			"extra":map[string]any{"type":"geojson","data":map[string]any{"type":"FeatureCollection","features":[]any{}}},
+		},
+		"layers":[]any{},
+	}
+	data,err:=json.Marshal(style);if err!=nil{t.Fatal(err)}
+	path:=filepath.Join(root,"styles","ru-v1.json")
+	if err:=os.WriteFile(path,data,0o644);err!=nil{t.Fatal(err)}
+	h:=sha256.Sum256(data);m.StyleSHA256=hex.EncodeToString(h[:]);m.StyleSize=int64(len(data))
+	if err:=ValidateFiles(root,m);err==nil{t.Fatal("additional style source accepted")}
+}
+
+func TestBuildManifestDerivesHeaderAndHashes(t *testing.T){
+	root,want:=writeMapFixture(t)
+	got,err:=BuildManifest(root,want.Version,want.PMTilesPath,want.StylePath,want.SourceName,want.AttributionHTML)
+	if err!=nil{t.Fatal(err)}
+	if got.PMTilesSHA256!=want.PMTilesSHA256 || got.StyleSHA256!=want.StyleSHA256 || got.Bounds!=want.Bounds || got.MinZoom!=want.MinZoom || got.MaxZoom!=want.MaxZoom{t.Fatalf("got=%+v want=%+v",got,want)}
+}
