@@ -16,8 +16,6 @@ type applyRow struct {
 	Staged StagedRow
 }
 
-// ApplyNext atomically applies one executable plan row and advances the batch
-// checkpoint. REVIEW/REJECT rows are intentionally not executable here.
 func (r *Repository) ApplyNext(ctx context.Context,batchID int64,workerID string,leaseExtension time.Duration)(bool,error){
 	if r==nil||r.db==nil{return false,errors.New("organization repository is not initialized")}
 	if batchID<=0||workerID==""||leaseExtension<=0{return false,ErrInvalidBatch}
@@ -42,6 +40,9 @@ ORDER BY p.plan_id LIMIT 1 FOR UPDATE OF p,s`,batchID,checkpoint).Scan(
 		&item.Staged.Name,&item.Staged.NormalizedName,&item.Staged.Phone,&item.Staged.Website,&item.Staged.Address,&item.Staged.NormalizedAddress,
 		&item.Staged.CategoryKey,&item.Staged.Latitude,&item.Staged.Longitude,&item.Staged.PayloadHash,&item.Staged.State)
 	if errors.Is(err,pgx.ErrNoRows){
+		var unresolved int
+		if err:=tx.QueryRow(ctx,`SELECT count(*) FROM organization_import_plans WHERE batch_id=$1 AND action='REVIEW'`,batchID).Scan(&unresolved);err!=nil{return false,err}
+		if unresolved>0{return false,ErrImportConflict}
 		_,err=tx.Exec(ctx,`UPDATE organization_import_batches SET status='DONE',worker_id=NULL,lease_until=NULL,
  applied_count=(SELECT count(*) FROM organization_import_plans WHERE batch_id=$1 AND applied_at IS NOT NULL),updated_at=now()
 WHERE batch_id=$1 AND worker_id=$2 AND status='APPLYING'`,batchID,workerID)
@@ -51,8 +52,6 @@ WHERE batch_id=$1 AND worker_id=$2 AND status='APPLYING'`,batchID,workerID)
 	}
 	if err!=nil{return false,err}
 
-	// Serialize all batches touching the same external source identity. This makes
-	// CREATE idempotent even when two imports of the same source overlap.
 	lockKey:=item.Staged.SourceKey+"\x00"+item.Staged.SourceRecordID
 	if _,err=tx.Exec(ctx,`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,lockKey);err!=nil{return false,err}
 
@@ -89,16 +88,21 @@ VALUES($1,$2,'APPLY',jsonb_build_object('plan_id',$3,'place_id',$4,'action',$5))
 }
 
 func applyNoop(ctx context.Context,tx pgx.Tx,item applyRow,placeID *int64)error{
+	var storedHash string
 	err:=tx.QueryRow(ctx,`UPDATE organization_source_links SET last_seen_at=now()
-WHERE source_key=$1 AND source_record_id=$2 RETURNING place_id`,item.Staged.SourceKey,item.Staged.SourceRecordID).Scan(placeID)
+WHERE source_key=$1 AND source_record_id=$2 RETURNING place_id,source_payload_hash`,item.Staged.SourceKey,item.Staged.SourceRecordID).Scan(placeID,&storedHash)
 	if errors.Is(err,pgx.ErrNoRows){return ErrImportConflict}
-	return err
+	if err!=nil{return err}
+	if storedHash!=item.Staged.PayloadHash{return ErrImportConflict}
+	return nil
 }
 
 func applyCreate(ctx context.Context,tx pgx.Tx,item applyRow)(int64,int64,error){
 	var existingPlace int64
-	err:=tx.QueryRow(ctx,`SELECT place_id FROM organization_source_links WHERE source_key=$1 AND source_record_id=$2 FOR UPDATE`,item.Staged.SourceKey,item.Staged.SourceRecordID).Scan(&existingPlace)
+	var existingHash string
+	err:=tx.QueryRow(ctx,`SELECT place_id,source_payload_hash FROM organization_source_links WHERE source_key=$1 AND source_record_id=$2 FOR UPDATE`,item.Staged.SourceKey,item.Staged.SourceRecordID).Scan(&existingPlace,&existingHash)
 	if err==nil{
+		if existingHash!=item.Staged.PayloadHash{return 0,0,ErrImportConflict}
 		_,err=tx.Exec(ctx,`UPDATE organization_source_links SET last_seen_at=now() WHERE source_key=$1 AND source_record_id=$2`,item.Staged.SourceKey,item.Staged.SourceRecordID)
 		return existingPlace,0,err
 	}
@@ -123,6 +127,7 @@ WHERE source_key=$1 AND source_record_id=$2 FOR UPDATE`,item.Staged.SourceKey,it
 	linked:=linkErr==nil
 	if linkErr!=nil&&!errors.Is(linkErr,pgx.ErrNoRows){return 0,0,linkErr}
 	if linked&&currentPlace!=targetPlaceID{return 0,0,ErrImportConflict}
+	if linked&&linkedHash==item.Staged.PayloadHash{return targetPlaceID,0,nil}
 
 	if err:=tx.QueryRow(ctx,`SELECT source_count FROM organizations WHERE place_id=$1 AND status IN ('ACTIVE','REVIEW') FOR UPDATE`,targetPlaceID).Scan(&sourceCount);errors.Is(err,pgx.ErrNoRows){return 0,0,ErrImportNotFound}else if err!=nil{return 0,0,err}
 	if !linked{
@@ -150,7 +155,6 @@ WHERE source_key=$1 AND source_record_id=$2`,item.Staged.SourceKey,item.Staged.S
 WHERE place_id=$1 RETURNING version`,targetPlaceID,item.Staged.CategoryKey,item.Staged.Phone,item.Staged.Website,item.Staged.Address,item.Staged.NormalizedAddress,item.Staged.Latitude,item.Staged.Longitude,sourceCount).Scan(&version)
 		if err!=nil{return 0,0,err}
 	}
-	_ = linkedHash
 	return targetPlaceID,version,nil
 }
 
@@ -167,7 +171,7 @@ func (r ApplyRunner) Run(ctx context.Context)error{
 	ticker:=time.NewTicker(r.PollInterval);defer ticker.Stop()
 	for{
 		if _,err:=r.Store.RequeueExpiredApply(ctx);err!=nil&&ctx.Err()==nil{return err}
-		batch,err:=r.Store.LeaseApply(ctx,r.WorkerID,r.LeaseDuration)
+		batch,err:=r.Store.LeaseReadyApply(ctx,r.WorkerID,r.LeaseDuration)
 		if errors.Is(err,ErrImportNotFound){select{case<-ctx.Done():return ctx.Err();case<-ticker.C:continue}}
 		if err!=nil{return err}
 		for{
