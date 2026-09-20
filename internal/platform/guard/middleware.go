@@ -9,10 +9,15 @@ import (
 	"time"
 )
 
+type LatencyObserver interface {
+	Observe(time.Duration)
+}
+
 type Middleware struct {
 	Limiter     *Limiter
 	Concurrency chan struct{}
 	Deadline    time.Duration
+	Latency     LatencyObserver
 }
 
 func NewMiddleware(limiter *Limiter, maxConcurrent int, deadline time.Duration) Middleware {
@@ -23,12 +28,19 @@ func NewMiddleware(limiter *Limiter, maxConcurrent int, deadline time.Duration) 
 
 func (m Middleware) Protect(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		if m.Latency != nil { defer func() { m.Latency.Observe(time.Since(started)) }() }
+
 		if m.Limiter != nil && !m.Limiter.Allow(clientKey(r)) {
 			w.Header().Set("Retry-After", "1")
 			writeGuardError(w, http.StatusTooManyRequests, "rate_limited")
 			return
 		}
 
+		if m.Concurrency == nil {
+			writeGuardError(w, http.StatusServiceUnavailable, "overloaded")
+			return
+		}
 		select {
 		case m.Concurrency <- struct{}{}:
 			defer func() { <-m.Concurrency }()
