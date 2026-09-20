@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+
+	"github.com/venomimonstro/poisk/internal/webmaster"
 )
 
 type ClickRecorder interface {
@@ -24,7 +26,8 @@ func (h TrackingHandler) Click(w http.ResponseWriter,r *http.Request){
 	if err:=h.Recorder.RecordClick(r.Context(),in.URL);err!=nil{
 		switch{
 		case errors.Is(err,context.DeadlineExceeded),errors.Is(err,context.Canceled):writeError(w,http.StatusGatewayTimeout,"tracking_timeout")
-		default:writeError(w,http.StatusBadRequest,"invalid_click")
+		case errors.Is(err,webmaster.ErrInvalidInput):writeError(w,http.StatusBadRequest,"invalid_click")
+		default:writeError(w,http.StatusInternalServerError,"tracking_error")
 		}
 		return
 	}
