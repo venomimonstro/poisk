@@ -78,10 +78,15 @@ WHERE p.staging_id=$1 AND p.action='REVIEW' AND b.status='PLANNED' FOR UPDATE OF
 		_,err=tx.Exec(ctx,`UPDATE organization_merge_review SET status='CREATE_NEW',decided_by=$2,decided_at=now() WHERE staging_id=$1 AND status='OPEN'`,stagingID,actor)
 	case "REJECT":
 		_,err=tx.Exec(ctx,`UPDATE organization_merge_review SET status='REJECTED',decided_by=$2,decided_at=now() WHERE staging_id=$1 AND status='OPEN'`,stagingID,actor)
+		if err==nil{
+			_,err=tx.Exec(ctx,`UPDATE organization_staging_rows SET state='REJECTED',rejection_code='MANUAL_REJECT',rejection_detail='Rejected during duplicate review',updated_at=now() WHERE staging_id=$1`,stagingID)
+		}
 	}
 	if err!=nil{return err}
+	var candidateValue any
+	if candidatePlaceID!=nil{candidateValue=*candidatePlaceID}
 	if _,err=tx.Exec(ctx,`INSERT INTO organization_import_events(batch_id,staging_id,action,details)
-VALUES($1,$2,'REVIEW_DECISION',jsonb_build_object('decision',$3,'actor',$4,'candidate_place_id',$5))`,batchID,stagingID,decision,actor,candidatePlaceID);err!=nil{return err}
+VALUES($1,$2,'REVIEW_DECISION',jsonb_build_object('decision',$3,'actor',$4,'candidate_place_id',$5))`,batchID,stagingID,decision,actor,candidateValue);err!=nil{return err}
 	return tx.Commit(ctx)
 }
 
