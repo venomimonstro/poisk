@@ -47,7 +47,10 @@ func (r *Repository) Ensure(ctx context.Context,userID,siteID int64)(Config,erro
 ), upserted AS (
  INSERT INTO site_search_widgets(site_id,public_key,status)
  SELECT site_id,$3,'ACTIVE' FROM owned
- ON CONFLICT(site_id) DO UPDATE SET status='ACTIVE',revoked_at=NULL,updated_at=now()
+ ON CONFLICT(site_id) DO UPDATE SET
+   public_key=CASE WHEN site_search_widgets.status='REVOKED' THEN EXCLUDED.public_key ELSE site_search_widgets.public_key END,
+   rotated_at=CASE WHEN site_search_widgets.status='REVOKED' THEN now() ELSE site_search_widgets.rotated_at END,
+   status='ACTIVE',revoked_at=NULL,updated_at=now()
  RETURNING widget_id,site_id,public_key,status,max_results,created_at
 )
 SELECT u.widget_id,u.site_id,u.public_key,o.origin,o.host,u.status,u.max_results,u.created_at
