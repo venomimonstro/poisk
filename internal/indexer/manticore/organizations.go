@@ -14,7 +14,7 @@ func (c *Client) EnsureOrganizationsSchema(ctx context.Context) error {
 	if err!=nil{return fmt.Errorf("describe organizations index: %w",err)}
 	hasCity,err:=rawHasColumn(body,"city_key");if err!=nil{return err}
 	if !hasCity{
-		if _,err:=c.execSQL(ctx,"ALTER TABLE "+OrganizationsIndex+" ADD COLUMN city_key string attribute indexed");err!=nil{return fmt.Errorf("add organizations city_key: %w",err)}
+		if _,err:=c.execSQL(ctx,"ALTER TABLE "+OrganizationsIndex+" ADD COLUMN city_key string indexed attribute");err!=nil{return fmt.Errorf("add organizations city_key: %w",err)}
 	}
 	return nil
 }
