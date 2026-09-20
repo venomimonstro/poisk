@@ -1,6 +1,7 @@
 package webmaster
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -41,7 +42,7 @@ func (p SitemapProcessor) Process(ctx context.Context,task SitemapTask) error {
 	if result.StatusCode<200 || result.StatusCode>=300{return fmt.Errorf("sitemap HTTP status %d",result.StatusCode)}
 	if !sameRawHost(result.FinalURL,task.Host){return errors.New("sitemap redirected outside verified host")}
 	compressed:=strings.HasSuffix(strings.ToLower(pathOnly(result.FinalURL)),".gz") || strings.Contains(strings.ToLower(result.Header.Get("Content-Type")),"gzip") || strings.Contains(strings.ToLower(result.Header.Get("Content-Encoding")),"gzip")
-	parsed,err:=sitemap.Parse(strings.NewReader(string(result.Body)),compressed,task.Depth,limits)
+	parsed,err:=sitemap.Parse(bytes.NewReader(result.Body),compressed,task.Depth,limits)
 	if err!=nil{return err}
 	switch parsed.Kind{
 	case sitemap.KindURLSet:
