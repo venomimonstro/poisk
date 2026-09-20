@@ -35,6 +35,11 @@ WITH picked AS (
       AND ws.attempts<ws.max_attempts
       AND s.status='VERIFIED'
       AND d.status='ACTIVE' AND d.policy<>'BLOCK'
+      AND EXISTS (
+          SELECT 1 FROM system_settings ss WHERE ss.key='resource_pressure'
+            AND ss.updated_at>=now()-interval '60 seconds'
+            AND COALESCE(ss.value->>'state','CRITICAL')<>'CRITICAL'
+      )
     ORDER BY ws.available_at,ws.sitemap_id
     FOR UPDATE OF ws SKIP LOCKED
     LIMIT $1
