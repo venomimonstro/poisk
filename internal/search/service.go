@@ -17,8 +17,10 @@ type Backend interface {
 }
 
 type Service struct {
-	Backend Backend
-	Cache   *Cache
+	Backend            Backend
+	Cache              *Cache
+	BackendConcurrency chan struct{}
+	flights            flightGroup
 }
 
 type Request struct {
@@ -61,8 +63,12 @@ func (s *Service) Search(ctx context.Context, req Request) (Response, error) {
 	queries := append([]string{norm.Primary}, norm.Variants...)
 	var found backend.Result
 	used := norm.Primary
+	backendLimit := minInt(limit*3, 50)
 	for _, q := range queries {
-		res, err := s.Backend.Search(ctx, q, minInt(limit*3, 50))
+		flightKey := q + "|" + strconv.Itoa(backendLimit)
+		res, err := s.flights.Do(ctx, flightKey, func() (backend.Result, error) {
+			return s.searchBackend(ctx, q, backendLimit)
+		})
 		if err != nil { return Response{}, err }
 		found = res
 		used = q
@@ -74,6 +80,17 @@ func (s *Service) Search(ctx context.Context, req Request) (Response, error) {
 	resp.Results = diversify(reranked, limit, 2)
 	if s.Cache != nil { s.Cache.Put(cacheKey, resp, 30*time.Second) }
 	return resp, nil
+}
+
+func (s *Service) searchBackend(ctx context.Context, q string, limit int) (backend.Result, error) {
+	if s.BackendConcurrency == nil { return s.Backend.Search(ctx, q, limit) }
+	select {
+	case s.BackendConcurrency <- struct{}{}:
+		defer func() { <-s.BackendConcurrency }()
+		return s.Backend.Search(ctx, q, limit)
+	case <-ctx.Done():
+		return backend.Result{}, ctx.Err()
+	}
 }
 
 // rerank keeps BM25 dominant and applies only bounded offline signals:
