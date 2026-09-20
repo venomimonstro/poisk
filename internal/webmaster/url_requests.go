@@ -18,30 +18,31 @@ func (r *Repository) QueueURLRequest(ctx context.Context, userID, siteID int64, 
 	if err != nil { return 0, err }
 	defer func(){ _ = tx.Rollback(ctx) }()
 
-	var domainID int64
-	err = tx.QueryRow(ctx, `SELECT domain_id FROM webmaster_sites WHERE site_id=$1 AND user_id=$2 AND status='VERIFIED' FOR SHARE`, siteID, userID).Scan(&domainID)
+	var siteDomainID int64
+	err = tx.QueryRow(ctx, `SELECT domain_id FROM webmaster_sites WHERE site_id=$1 AND user_id=$2 AND status='VERIFIED' FOR SHARE`, siteID, userID).Scan(&siteDomainID)
 	if errors.Is(err, pgx.ErrNoRows) { return 0, ErrNotVerified }
 	if err != nil { return 0, fmt.Errorf("load verified webmaster site: %w", err) }
 
-	var urlID, version int64
+	var urlID, version, urlDomainID int64
 	switch operation {
 	case "SUBMIT", "REINDEX":
 		err = tx.QueryRow(ctx, `
 INSERT INTO urls(domain_id,normalized_url,crawl_status,index_status,next_crawl_at)
 VALUES($1,$2,'DISCOVERED','NOT_INDEXED',now())
 ON CONFLICT(normalized_url) DO UPDATE SET next_crawl_at=now(), updated_at=now()
-RETURNING url_id,version,domain_id`, domainID, normalizedURL).Scan(&urlID,&version,&domainID)
+RETURNING url_id,version,domain_id`, siteDomainID, normalizedURL).Scan(&urlID,&version,&urlDomainID)
 		if err != nil { return 0, fmt.Errorf("ensure webmaster URL: %w",err) }
+		if urlDomainID != siteDomainID { return 0, ErrNotFound }
 		if _,err=tx.Exec(ctx, `
 INSERT INTO crawl_queue(url_id,domain_id,generation,priority,status,available_at)
 VALUES($1,$2,$3,100,'READY',now())
-ON CONFLICT DO NOTHING`,urlID,domainID,version); err!=nil { return 0,fmt.Errorf("enqueue webmaster crawl: %w",err) }
+ON CONFLICT DO NOTHING`,urlID,siteDomainID,version); err!=nil { return 0,fmt.Errorf("enqueue webmaster crawl: %w",err) }
 	case "DELETE":
 		err = tx.QueryRow(ctx, `
 UPDATE urls
 SET version=version+1,index_status='DELETED',updated_at=now()
 WHERE domain_id=$1 AND normalized_url=$2
-RETURNING url_id,version`,domainID,normalizedURL).Scan(&urlID,&version)
+RETURNING url_id,version`,siteDomainID,normalizedURL).Scan(&urlID,&version)
 		if errors.Is(err,pgx.ErrNoRows) { return 0,ErrNotFound }
 		if err!=nil { return 0,fmt.Errorf("mark webmaster URL deleted: %w",err) }
 		if _,err=tx.Exec(ctx, `
