@@ -87,6 +87,8 @@ func run() error {
 		return runAdminCtl(ctx, pool, os.Args[2:])
 	case "releasectl":
 		return runReleaseCtl(ctx, pool, os.Args[2:])
+	case "billingctl":
+		return runBillingCtl(ctx, pool, os.Args[2:])
 	case "quality":
 		return runQuality(cfg)
 	default:
