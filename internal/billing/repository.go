@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -62,9 +63,8 @@ func (r *Repository) CreatePendingSubscription(ctx context.Context,accountID int
 	if err=tx.QueryRow(ctx,`SELECT CASE WHEN webmaster_user_id IS NOT NULL THEN 'USER' WHEN agency_id IS NOT NULL THEN 'AGENCY' ELSE 'PLACE' END,status FROM billing_accounts WHERE account_id=$1 FOR UPDATE`,accountID).Scan(&accountType,&status);errors.Is(err,pgx.ErrNoRows){return Subscription{},Invoice{},ErrNotFound};if err!=nil{return Subscription{},Invoice{},err};if status!="ACTIVE"{return Subscription{},Invoice{},ErrForbidden}
 	var raw []byte;err=tx.QueryRow(ctx,`SELECT plan_id,product_code,plan_code,version,monthly_price_kopecks,currency,quotas FROM billing_plans WHERE plan_code=$1 AND status='ACTIVE' ORDER BY version DESC LIMIT 1`,planCode).Scan(&plan.ID,&plan.Product,&plan.Code,&plan.Version,&plan.PriceKopecks,&plan.Currency,&raw);if errors.Is(err,pgx.ErrNoRows){return Subscription{},Invoice{},ErrNotFound};if err!=nil{return Subscription{},Invoice{},err};if err=json.Unmarshal(raw,&plan.Quotas);err!=nil{return Subscription{},Invoice{},err}
 	if !productAllowedForOwner(plan.Product,accountType){return Subscription{},Invoice{},ErrForbidden}
-	var exists bool;if err=tx.QueryRow(ctx,`SELECT EXISTS(SELECT 1 FROM billing_subscriptions s JOIN billing_plans p ON p.plan_id=s.plan_id WHERE s.account_id=$1 AND p.product_code=$2 AND s.status IN ('PENDING','ACTIVE','GRACE','PAST_DUE'))`,accountID,plan.Product).Scan(&exists);err!=nil{return Subscription{},Invoice{},err};if exists{return Subscription{},Invoice{},ErrConflict}
 	periodEnd:=now.AddDate(0,1,0);var sub Subscription
-	err=tx.QueryRow(ctx,`INSERT INTO billing_subscriptions(account_id,plan_id,status,current_period_start,current_period_end) VALUES($1,$2,'PENDING',$3,$4) RETURNING subscription_id,account_id,plan_id,status,current_period_start,current_period_end,grace_until`,accountID,plan.ID,now,periodEnd).Scan(&sub.ID,&sub.AccountID,&sub.PlanID,&sub.Status,&sub.PeriodStart,&sub.PeriodEnd,&sub.GraceUntil);if err!=nil{return Subscription{},Invoice{},err}
+	err=tx.QueryRow(ctx,`INSERT INTO billing_subscriptions(account_id,plan_id,product_code,status,current_period_start,current_period_end) VALUES($1,$2,$3,'PENDING',$4,$5) RETURNING subscription_id,account_id,plan_id,status,current_period_start,current_period_end,grace_until`,accountID,plan.ID,plan.Product,now,periodEnd).Scan(&sub.ID,&sub.AccountID,&sub.PlanID,&sub.Status,&sub.PeriodStart,&sub.PeriodEnd,&sub.GraceUntil);if isUniqueViolation(err){return Subscription{},Invoice{},ErrConflict};if err!=nil{return Subscription{},Invoice{},err}
 	external:=fmt.Sprintf("poisk-inv-%d-%d",sub.ID,now.Unix());var inv Invoice
 	err=tx.QueryRow(ctx,`INSERT INTO billing_invoices(account_id,subscription_id,external_reference,status,amount_kopecks,currency,period_start,period_end,due_at) VALUES($1,$2,$3,'OPEN',$4,$5,$6,$7,$8) RETURNING invoice_id,account_id,subscription_id,status,amount_kopecks,currency,external_reference`,accountID,sub.ID,external,plan.PriceKopecks,plan.Currency,now,periodEnd,now.Add(24*time.Hour)).Scan(&inv.ID,&inv.AccountID,&inv.SubscriptionID,&inv.Status,&inv.AmountKopecks,&inv.Currency,&inv.ExternalReference);if err!=nil{return Subscription{},Invoice{},err}
 	_,err=tx.Exec(ctx,`INSERT INTO billing_ledger_entries(account_id,invoice_id,entry_type,amount_kopecks,currency,idempotency_key,details) VALUES($1,$2,'INVOICE',$3,$4,$5,jsonb_build_object('plan_code',$6,'plan_version',$7))`,accountID,inv.ID,plan.PriceKopecks,plan.Currency,fmt.Sprintf("invoice:%d",inv.ID),plan.Code,plan.Version);if err!=nil{return Subscription{},Invoice{},err}
@@ -72,6 +72,7 @@ func (r *Repository) CreatePendingSubscription(ctx context.Context,accountID int
 }
 
 func productAllowedForOwner(product,owner string)bool{switch product{case "WEBMASTER_PRO","SITE_SEARCH_PRO","BUSINESS_PRO","SEARCH_API","GEO_API":return owner=="USER";case "AGENCY":return owner=="AGENCY"};return false}
+func isUniqueViolation(err error)bool{var pgErr *pgconn.PgError;return errors.As(err,&pgErr)&&pgErr.Code=="23505"}
 
 func (r *Repository) Entitlement(ctx context.Context,accountID int64,product string,now time.Time)(Entitlement,error){
 	product=strings.ToUpper(strings.TrimSpace(product));if r==nil||r.db==nil||accountID<=0||product==""{return Entitlement{},ErrInvalid};if now.IsZero(){now=time.Now().UTC()};var out Entitlement;var raw []byte;var status string;var grace *time.Time
