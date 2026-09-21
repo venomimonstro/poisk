@@ -28,6 +28,12 @@ type Request struct {
 	Limit int    `json:"limit,omitempty"`
 }
 
+type CoverageSnapshot struct {
+	AverageQuality float64
+	AverageFreshness float64
+	AverageSpam float64
+}
+
 type Response struct {
 	Query      string   `json:"query"`
 	Normalized string   `json:"normalized"`
@@ -36,6 +42,7 @@ type Response struct {
 	TookMS     int64    `json:"took_ms"`
 	Results    []Result `json:"results"`
 	Cached     bool     `json:"cached"`
+	Coverage   CoverageSnapshot `json:"-"`
 }
 
 type Result struct {
@@ -76,10 +83,17 @@ func (s *Service) Search(ctx context.Context, req Request) (Response, error) {
 	}
 
 	reranked := rerank(found.Hits)
-	resp := Response{Query: req.Query, Normalized: norm.Primary, UsedQuery: used, Total: found.Total, TookMS: found.TookMS}
+	resp := Response{Query: req.Query, Normalized: norm.Primary, UsedQuery: used, Total: found.Total, TookMS: found.TookMS, Coverage:coverageSnapshot(found.Hits)}
 	resp.Results = diversify(reranked, limit, 2)
 	if s.Cache != nil { s.Cache.Put(cacheKey, resp, 30*time.Second) }
 	return resp, nil
+}
+
+func coverageSnapshot(hits []backend.Hit)CoverageSnapshot{
+	if len(hits)==0{return CoverageSnapshot{AverageFreshness:50}}
+	limit:=len(hits);if limit>10{limit=10};var q,spam float64
+	for i:=0;i<limit;i++{q+=hits[i].QualityScore;spam+=hits[i].SpamScore}
+	return CoverageSnapshot{AverageQuality:q/float64(limit),AverageFreshness:50,AverageSpam:spam/float64(limit)}
 }
 
 func (s *Service) searchBackend(ctx context.Context, q string, limit int) (backend.Result, error) {
@@ -93,10 +107,6 @@ func (s *Service) searchBackend(ctx context.Context, q string, limit int) (backe
 	}
 }
 
-// rerank keeps BM25 dominant and applies only bounded offline signals:
-// quality contributes at most +20%, authority at most +10%, while spam can
-// demote strongly. No offline signal can turn an irrelevant zero lexical score
-// into a relevant result because all factors multiply the lexical score.
 func rerank(hits []backend.Hit) []backend.Hit {
 	out := append([]backend.Hit(nil), hits...)
 	for i := range out {
