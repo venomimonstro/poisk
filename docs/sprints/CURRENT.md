@@ -1,59 +1,55 @@
 # CURRENT SPRINT
 
-**Sprint:** 18 — Monetization
+**Sprint:** 19 — Demand Driven Index
 **Status:** IN_PROGRESS
 
 ## Goal
-Добавить provider-neutral коммерческий контур поверх Webmaster/Growth/API без продажи organic ranking: планы Webmaster Pro, Agency, Site Search Pro, Business Pro, billing lifecycle и жёсткие usage limits. Денежные операции должны быть идемпотентными, суммы храниться целыми копейками, а отключение/истечение тарифа не должно повреждать canonical Search/Webmaster/GEO данные.
+Добавить privacy-bounded Demand Driven Index поверх существующего Search/Crawler: считать Demand, Coverage, Quality, Freshness и Spam сигналы, материализовывать Query Gap только при подтверждённом спросе и слабой выдаче и давать crawler ограниченный feedback. Пользовательский запрос не должен напрямую создавать URL/crawl job, а платные продукты, referral и billing не должны влиять на organic crawl priority.
 
 ## Depends On
 - Sprint 00–08 — PASS
 - Sprint 09–16 — PASS (code/static gate where noted in reports)
 - Sprint 17 — PASS (code/static gate)
+- Sprint 18 — PASS (code/static gate; report created)
 
 ## Allowed Work
-- billing accounts tied to Webmaster users, agencies and claimed organizations
-- immutable plan catalog with versioned prices/quotas
-- Webmaster Pro, Agency, Site Search Pro and Business Pro entitlements
-- provider-neutral invoices/payment events/subscription lifecycle
-- idempotent payment-event ingestion
-- integer kopeck accounting and immutable ledger entries
-- monthly usage periods and atomic usage counters
-- hard/soft quota checks for paid features
-- plan downgrade/expiry/grace-period behavior
-- Site Search usage limits and owner usage visibility
-- Agency member/site limits
-- Business Pro limits for claimed organizations
-- Search/GEO API key + usage metering only where it does not change organic ranking
-- billing/admin diagnostics, reconciliation and tests
+- normalized query hashing and bounded representative query retention only after gap qualification
+- time-bucketed demand signals without IP/User-Agent storage
+- Search Coverage Score from Demand/Coverage/Quality/Freshness/Spam
+- Query Gap OPEN/WATCH/RESOLVED/SUPPRESSED lifecycle
+- decay, caps and minimum independent time-bucket requirements
+- manipulation protection against repeated/high-frequency query spam
+- bounded feedback to existing canonical domains/URLs/category budgets
+- bounded recrawl priority/frequency changes for trusted existing corpus only
+- operator diagnostics and immutable feedback audit
+- deterministic scorer/unit/integration tests and documentation
 
 ## Forbidden Work
-- paid organic ranking, paid crawl priority or SERP boosts
-- advertising auction/ranking
-- Sprint 19 Query Gap / Demand Driven Index implementation
-- storing card data or payment credentials
-- coupling core billing state to a single payment provider
-- floating-point money
+- Sprint 20 city/category pages, trends, programmatic SEO or Data Hub
+- direct query-to-URL crawl injection
+- accepting arbitrary external URLs from query-gap signals
+- paid ranking, paid crawl priority, billing/referral-based demand boosts
+- storing IP addresses, User-Agent strings or per-user query histories for demand scoring
+- unbounded raw query event logs
 - Redis/Kafka/RabbitMQ
 - Kubernetes
 - Elasticsearch/OpenSearch
 - GitHub Actions/CI
 
 ## Definition of Done
-- [ ] every billable owner has an isolated billing account
-- [ ] plan catalog is versioned and money is stored in integer kopecks
-- [ ] subscription state transitions are explicit and auditable
-- [ ] payment events are idempotent and cannot double-credit the ledger
-- [ ] immutable ledger can reconcile invoices/payments/credits
-- [ ] Webmaster Pro entitlements and limits are enforceable server-side
-- [ ] Agency paid member/site limits are enforceable server-side
-- [ ] Site Search Pro request/result quotas are enforceable server-side
-- [ ] Business Pro entitlements require an active verified organization claim
-- [ ] usage counters are atomic, period-bounded and owner isolated
-- [ ] expiry/downgrade removes paid entitlements without deleting canonical data
-- [ ] billing/admin diagnostics expose reconciliation state without payment secrets
-- [ ] monetization does not alter organic ranking or crawl priority
-- [ ] security/integration tests cover idempotency, isolation, quota race and downgrade
-- [ ] no Sprint 19+ scope is pulled in
+- [ ] demand signals are bucketed, capped and contain no IP/User-Agent identity
+- [ ] repeated requests in one bucket cannot linearly inflate demand
+- [ ] Query Gap requires minimum independent buckets plus low Coverage/Quality
+- [ ] Search Coverage Score includes Demand, Coverage, Quality, Freshness and Spam
+- [ ] scores are deterministic, bounded 0–100 and documented
+- [ ] representative query text is retained only for qualified gaps and is length bounded
+- [ ] Query Gap lifecycle supports OPEN/WATCH/RESOLVED/SUPPRESSED
+- [ ] crawler feedback applies only to existing trusted canonical entities
+- [ ] crawler priority/recrawl feedback is capped and expires/decays
+- [ ] no query text can directly enqueue an arbitrary URL
+- [ ] billing, referral and paid-plan state cannot affect demand/gap/crawl scores
+- [ ] feedback actions are auditable and idempotent
+- [ ] tests cover bucket anti-spam, score boundaries, gap qualification, feedback caps and paid-signal isolation
+- [ ] no Sprint 20+ scope is pulled in
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 18 report created
+- [ ] Sprint 19 report created
