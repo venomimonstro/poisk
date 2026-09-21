@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/venomimonstro/poisk/internal/demand"
 	querynorm "github.com/venomimonstro/poisk/internal/query"
@@ -66,7 +67,9 @@ func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
 		_ = h.Impressions.RecordSearchImpressions(r.Context(), hosts)
 	}
 	if h.Demand!=nil{
-		_,_ = h.Demand.Record(r.Context(),demand.Snapshot{Normalized:resp.Normalized,Total:resp.Total,AverageQuality:resp.Coverage.AverageQuality,AverageFreshness:resp.Coverage.AverageFreshness,AverageSpam:resp.Coverage.AverageSpam},time.Now().UTC())
+		ctx,cancel:=context.WithTimeout(r.Context(),50*time.Millisecond)
+		_,_ = h.Demand.Record(ctx,demand.Snapshot{Normalized:resp.Normalized,Total:resp.Total,AverageQuality:resp.Coverage.AverageQuality,AverageFreshness:resp.Coverage.AverageFreshness,AverageSpam:resp.Coverage.AverageSpam},time.Now().UTC())
+		cancel()
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
