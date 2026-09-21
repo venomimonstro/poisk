@@ -71,7 +71,7 @@ func (r *Repository) CreatePendingSubscription(ctx context.Context,accountID int
 	if err=tx.Commit(ctx);err!=nil{return Subscription{},Invoice{},err};return sub,inv,nil
 }
 
-func productAllowedForOwner(product,owner string)bool{switch product{case "WEBMASTER_PRO","SITE_SEARCH_PRO","SEARCH_API","GEO_API":return owner=="USER";case "AGENCY":return owner=="AGENCY";case "BUSINESS_PRO":return owner=="PLACE"};return false}
+func productAllowedForOwner(product,owner string)bool{switch product{case "WEBMASTER_PRO","SITE_SEARCH_PRO","BUSINESS_PRO","SEARCH_API","GEO_API":return owner=="USER";case "AGENCY":return owner=="AGENCY"};return false}
 
 func (r *Repository) Entitlement(ctx context.Context,accountID int64,product string,now time.Time)(Entitlement,error){
 	product=strings.ToUpper(strings.TrimSpace(product));if r==nil||r.db==nil||accountID<=0||product==""{return Entitlement{},ErrInvalid};if now.IsZero(){now=time.Now().UTC()};var out Entitlement;var raw []byte;var status string;var grace *time.Time
