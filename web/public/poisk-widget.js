@@ -7,6 +7,7 @@
 
   let apiBase;
   try { apiBase = new URL(script.src, window.location.href).origin; } catch { return; }
+  const pageHost = window.location.hostname.toLowerCase().replace(/\.$/, "");
   const targetSelector = (script.dataset.target || "").trim();
   const mount = targetSelector ? document.querySelector(targetSelector) : null;
   const root = mount || document.createElement("div");
@@ -94,7 +95,8 @@
         a.textContent = String(item.title || item.url || "Результат");
         try {
           const destination = new URL(String(item.url || ""), window.location.origin);
-          if (destination.protocol !== "http:" && destination.protocol !== "https:") continue;
+          const destinationHost = destination.hostname.toLowerCase().replace(/\.$/, "");
+          if ((destination.protocol !== "http:" && destination.protocol !== "https:") || destinationHost !== pageHost) continue;
           a.href = destination.href;
         } catch { continue; }
         const snippet = document.createElement("div");
