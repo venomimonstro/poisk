@@ -26,6 +26,8 @@ func (h Handler) Routes()http.Handler{
 	r.Get("/{agencyID}/sites",h.ListSites)
 	r.Post("/{agencyID}/sites/{siteID}",h.GrantSite)
 	r.Delete("/{agencyID}/sites/{siteID}",h.RevokeSite)
+	r.Post("/{agencyID}/sites/{siteID}/sitemaps",h.SubmitSitemap)
+	r.Post("/{agencyID}/sites/{siteID}/urls",h.SubmitURL)
 	return r
 }
 
@@ -40,6 +42,8 @@ func (h Handler) AddMember(w http.ResponseWriter,r *http.Request){u,_:=current(r
 func (h Handler) ListSites(w http.ResponseWriter,r *http.Request){u,_:=current(r);agencyID,ok:=pathID(r,"agencyID");if !ok{writeError(w,400,"invalid_agency_id");return};sites,err:=h.Agencies.ListSites(r.Context(),u.ID,agencyID);if err!=nil{writeAgencyError(w,err);return};writeJSON(w,200,map[string]any{"sites":sites})}
 func (h Handler) GrantSite(w http.ResponseWriter,r *http.Request){u,_:=current(r);agencyID,aok:=pathID(r,"agencyID");siteID,sok:=pathID(r,"siteID");if !aok||!sok{writeError(w,400,"invalid_id");return};var in struct{Permission string `json:"permission"`};if decode(w,r,&in)!=nil{writeError(w,400,"invalid_json");return};if err:=h.Agencies.GrantSite(r.Context(),u.ID,agencyID,siteID,in.Permission);err!=nil{writeAgencyError(w,err);return};writeJSON(w,200,map[string]bool{"ok":true})}
 func (h Handler) RevokeSite(w http.ResponseWriter,r *http.Request){u,_:=current(r);agencyID,aok:=pathID(r,"agencyID");siteID,sok:=pathID(r,"siteID");if !aok||!sok{writeError(w,400,"invalid_id");return};if err:=h.Agencies.RevokeSite(r.Context(),u.ID,agencyID,siteID);err!=nil{writeAgencyError(w,err);return};writeJSON(w,200,map[string]bool{"ok":true})}
+func (h Handler) SubmitSitemap(w http.ResponseWriter,r *http.Request){u,_:=current(r);agencyID,aok:=pathID(r,"agencyID");siteID,sok:=pathID(r,"siteID");if !aok||!sok{writeError(w,400,"invalid_id");return};var in struct{URL string `json:"url"`};if decode(w,r,&in)!=nil{writeError(w,400,"invalid_json");return};id,err:=h.Agencies.SubmitSitemap(r.Context(),u.ID,agencyID,siteID,in.URL);if err!=nil{writeAgencyError(w,err);return};writeJSON(w,202,map[string]int64{"sitemap_id":id})}
+func (h Handler) SubmitURL(w http.ResponseWriter,r *http.Request){u,_:=current(r);agencyID,aok:=pathID(r,"agencyID");siteID,sok:=pathID(r,"siteID");if !aok||!sok{writeError(w,400,"invalid_id");return};var in struct{URL string `json:"url"`;Operation string `json:"operation"`};if decode(w,r,&in)!=nil{writeError(w,400,"invalid_json");return};id,err:=h.Agencies.SubmitURL(r.Context(),u.ID,agencyID,siteID,in.URL,in.Operation);if err!=nil{writeAgencyError(w,err);return};writeJSON(w,202,map[string]int64{"request_id":id})}
 
 func pathID(r *http.Request,name string)(int64,bool){v,err:=strconv.ParseInt(chi.URLParam(r,name),10,64);return v,err==nil&&v>0}
 func bearer(v string)string{parts:=strings.Fields(v);if len(parts)==2&&strings.EqualFold(parts[0],"Bearer"){return parts[1]};return ""}
