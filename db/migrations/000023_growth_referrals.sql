@@ -26,12 +26,13 @@ CREATE INDEX idx_growth_attribution_expiry ON growth_attribution_sessions(expire
 CREATE INDEX idx_growth_attribution_referral ON growth_attribution_sessions(referral_id,created_at);
 
 CREATE TABLE growth_attribution_daily (
+    daily_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     owner_user_id BIGINT REFERENCES webmaster_users(user_id) ON DELETE CASCADE,
     referral_id BIGINT REFERENCES growth_referrals(referral_id) ON DELETE CASCADE,
     campaign_key TEXT NOT NULL DEFAULT '',
     flow TEXT NOT NULL,
     day DATE NOT NULL,
     starts BIGINT NOT NULL DEFAULT 0 CHECK (starts>=0),
-    conversions BIGINT NOT NULL DEFAULT 0 CHECK (conversions>=0),
-    PRIMARY KEY(owner_user_id,referral_id,campaign_key,flow,day)
+    conversions BIGINT NOT NULL DEFAULT 0 CHECK (conversions>=0)
 );
+CREATE UNIQUE INDEX uq_growth_attribution_daily_dims ON growth_attribution_daily(owner_user_id,referral_id,campaign_key,flow,day) NULLS NOT DISTINCT;
