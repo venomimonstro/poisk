@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/venomimonstro/poisk/internal/billing"
 	"github.com/venomimonstro/poisk/internal/webmaster"
 	wmauth "github.com/venomimonstro/poisk/internal/webmaster/auth"
 )
@@ -18,7 +19,7 @@ import (
 type contextKey string
 const userContextKey contextKey = "webmaster-user"
 
-type Handler struct { Service *webmaster.Service }
+type Handler struct { Service *webmaster.Service; Billing *billing.Repository }
 
 func (h Handler) Routes() http.Handler {
 	r:=chi.NewRouter()
@@ -92,6 +93,12 @@ func (h Handler) AddSite(w http.ResponseWriter,r *http.Request){
 	user,_:=currentUser(r)
 	var in struct{ Origin string `json:"origin"` }
 	if !decodeJSON(w,r,&in) { return }
+	if h.Billing!=nil {
+		accountID,err:=h.Billing.AccountIDForUser(r.Context(),user.ID); if err!=nil { writeBillingError(w,err); return }
+		q,err:=h.Billing.EffectiveQuota(r.Context(),accountID,"WEBMASTER_PRO","sites",3,time.Now()); if err!=nil { writeBillingError(w,err); return }
+		sites,err:=h.Service.Sites(r.Context(),user.ID); if err!=nil { writeServiceError(w,err); return }
+		if int64(len(sites))>=q.Limit { writeError(w,http.StatusPaymentRequired,"site_limit_reached"); return }
+	}
 	site,err:=h.Service.AddSite(r.Context(),user.ID,in.Origin)
 	if err!=nil { writeServiceError(w,err); return }
 	writeJSON(w,http.StatusCreated,site)
@@ -118,6 +125,7 @@ func (h Handler) SubmitSitemap(w http.ResponseWriter,r *http.Request){
 	user,_:=currentUser(r); siteID,ok:=siteIDParam(w,r); if !ok { return }
 	var in struct{ URL string `json:"url"` }
 	if !decodeJSON(w,r,&in) { return }
+	if !h.consumeWebmaster(w,r,user.ID,"sitemaps_month",10) { return }
 	id,err:=h.Service.SubmitSitemap(r.Context(),user.ID,siteID,in.URL)
 	if err!=nil { writeServiceError(w,err); return }
 	writeJSON(w,http.StatusAccepted,map[string]any{"sitemap_id":id})
@@ -127,9 +135,16 @@ func (h Handler) SubmitURL(w http.ResponseWriter,r *http.Request){
 	user,_:=currentUser(r); siteID,ok:=siteIDParam(w,r); if !ok { return }
 	var in struct{ URL string `json:"url"`; Operation string `json:"operation"` }
 	if !decodeJSON(w,r,&in) { return }
+	if !h.consumeWebmaster(w,r,user.ID,"url_requests_month",100) { return }
 	id,err:=h.Service.SubmitURL(r.Context(),user.ID,siteID,in.URL,in.Operation)
 	if err!=nil { writeServiceError(w,err); return }
 	writeJSON(w,http.StatusAccepted,map[string]any{"request_id":id})
+}
+
+func (h Handler) consumeWebmaster(w http.ResponseWriter,r *http.Request,userID int64,metric string,freeLimit int64)bool{
+	if h.Billing==nil{return true}
+	accountID,err:=h.Billing.AccountIDForUser(r.Context(),userID);if err!=nil{writeBillingError(w,err);return false}
+	_,_,err=h.Billing.ConsumeEffective(r.Context(),accountID,"WEBMASTER_PRO",metric,freeLimit,1,time.Now());if err!=nil{writeBillingError(w,err);return false};return true
 }
 
 func (h Handler) URLStatus(w http.ResponseWriter,r *http.Request){
@@ -162,6 +177,7 @@ func decodeJSON(w http.ResponseWriter,r *http.Request,dst any) bool {
 	return true
 }
 
+func writeBillingError(w http.ResponseWriter,err error){switch{case errors.Is(err,billing.ErrQuotaExceeded):writeError(w,http.StatusPaymentRequired,"usage_limit_reached");case errors.Is(err,billing.ErrInvalid):writeError(w,http.StatusBadRequest,"invalid_billing_request");default:writeError(w,http.StatusServiceUnavailable,"billing_unavailable")}}
 func writeServiceError(w http.ResponseWriter,err error){
 	switch {
 	case errors.Is(err,webmaster.ErrUnauthorized): writeError(w,http.StatusUnauthorized,"unauthorized")
