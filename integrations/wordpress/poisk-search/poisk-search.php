@@ -1,13 +1,14 @@
 <?php
 /**
  * Plugin Name: Poisk Site Search
- * Description: Adds Poisk ownership verification and the Poisk site-search widget without storing Webmaster account credentials.
- * Version: 0.1.0
+ * Description: Adds Poisk ownership verification, Webmaster submit controls and the Poisk site-search widget.
+ * Version: 0.2.0
  * Requires at least: 6.4
  * Requires PHP: 8.1
  */
 
 if (!defined('ABSPATH')) { exit; }
+require_once __DIR__ . '/api.php';
 
 final class Poisk_Site_Search {
     private const OPTION_VERIFICATION = 'poisk_verification_token';
@@ -78,19 +79,24 @@ final class Poisk_Site_Search {
 
     public static function settingsPage(): void {
         if (!current_user_can('manage_options')) { return; }
+        $status = sanitize_key((string)($_GET['poisk_status'] ?? ''));
         ?>
         <div class="wrap">
             <h1>Poisk Site Search</h1>
-            <p>Плагин не хранит логин, пароль или Webmaster bearer token. В WordPress сохраняются только verification token и publishable widget key.</p>
+            <p>Verification token и publishable widget key не являются аккаунтными секретами. Webmaster bearer token хранится только server-side в зашифрованном виде и никогда не выводится обратно в HTML.</p>
+            <?php if ($status !== ''): ?><div class="notice notice-info"><p><?php echo esc_html($status); ?></p></div><?php endif; ?>
             <form method="post" action="options.php">
                 <?php settings_fields('poisk_search'); ?>
                 <table class="form-table" role="presentation">
                     <tr><th scope="row"><label for="poisk_verification_token">Verification token</label></th><td><input class="regular-text code" id="poisk_verification_token" name="<?php echo esc_attr(self::OPTION_VERIFICATION); ?>" value="<?php echo esc_attr(get_option(self::OPTION_VERIFICATION, '')); ?>" autocomplete="off"></td></tr>
                     <tr><th scope="row"><label for="poisk_widget_public_key">Widget public key</label></th><td><input class="regular-text code" id="poisk_widget_public_key" name="<?php echo esc_attr(self::OPTION_WIDGET_KEY); ?>" value="<?php echo esc_attr(get_option(self::OPTION_WIDGET_KEY, '')); ?>" autocomplete="off"></td></tr>
                     <tr><th scope="row"><label for="poisk_widget_script_url">Widget script URL</label></th><td><input class="regular-text code" id="poisk_widget_script_url" name="<?php echo esc_attr(self::OPTION_WIDGET_SRC); ?>" value="<?php echo esc_attr(get_option(self::OPTION_WIDGET_SRC, '')); ?>" placeholder="https://search.example/widget/poisk-search.js"></td></tr>
+                    <?php Poisk_Webmaster_API::settingsFields(); ?>
                 </table>
                 <?php submit_button(); ?>
             </form>
+            <?php Poisk_Webmaster_API::credentialForm(); ?>
+            <?php Poisk_Webmaster_API::submitForms(); ?>
             <p>Для вывода поиска добавьте shortcode <code>[poisk_search]</code>.</p>
         </div>
         <?php
