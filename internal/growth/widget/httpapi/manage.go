@@ -24,6 +24,7 @@ func (h ManageHandler) ServeHTTP(w http.ResponseWriter,r *http.Request){
 	switch r.Method{
 	case http.MethodGet:
 		siteID,err:=strconv.ParseInt(r.URL.Query().Get("site_id"),10,64);if err!=nil||siteID<=0{manageError(w,http.StatusBadRequest,"invalid_site_id");return}
+		if r.URL.Query().Get("analytics")=="1"{days,_:=strconv.Atoi(r.URL.Query().Get("days"));usage,err:=h.Widgets.Usage(r.Context(),user.ID,siteID,days);if err!=nil{manageError(w,http.StatusForbidden,"forbidden");return};manageJSON(w,http.StatusOK,map[string]any{"days":usage});return}
 		cfg,err:=h.Widgets.Owned(r.Context(),user.ID,siteID);if err!=nil{manageError(w,http.StatusNotFound,"widget_not_found");return};manageJSON(w,http.StatusOK,cfg)
 	case http.MethodPost:
 		var in manageRequest;if err:=manageDecode(w,r,&in,4<<10);err!=nil||in.SiteID<=0{manageError(w,http.StatusBadRequest,"invalid_request");return}
