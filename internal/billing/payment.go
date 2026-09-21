@@ -27,11 +27,12 @@ func (r *Repository) ApplyPaymentEvent(ctx context.Context,in PaymentEvent)(Paym
 	in.Provider=strings.ToUpper(strings.TrimSpace(in.Provider));in.ProviderEventID=strings.TrimSpace(in.ProviderEventID);in.Type=strings.ToUpper(strings.TrimSpace(in.Type));in.Currency=strings.ToUpper(strings.TrimSpace(in.Currency));if in.OccurredAt.IsZero(){in.OccurredAt=time.Now().UTC()}
 	if r==nil||r.db==nil||len(in.Provider)<2||len(in.Provider)>32||len(in.ProviderEventID)<1||len(in.ProviderEventID)>160||in.InvoiceID<=0||in.AmountKopecks<0||in.Currency!="RUB"||!validPaymentType(in.Type){return PaymentResult{},ErrInvalid}
 	hash:=hashPayload(in.Payload);tx,err:=r.db.BeginTx(ctx,pgx.TxOptions{});if err!=nil{return PaymentResult{},err};defer func(){_=tx.Rollback(ctx)}()
-	var eventID int64;var storedHash []byte;var processed *time.Time
+	var eventID int64;var storedHash []byte;var processed *time.Time;var storedType,storedCurrency string;var storedInvoice,storedAmount int64
 	err=tx.QueryRow(ctx,`INSERT INTO billing_payment_events(provider,provider_event_id,event_type,invoice_id,amount_kopecks,currency,payload_hash,occurred_at)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 ON CONFLICT(provider,provider_event_id) DO UPDATE SET provider_event_id=EXCLUDED.provider_event_id
-RETURNING payment_event_id,payload_hash,processed_at`,in.Provider,in.ProviderEventID,in.Type,in.InvoiceID,in.AmountKopecks,in.Currency,hash[:],in.OccurredAt).Scan(&eventID,&storedHash,&processed);if err!=nil{return PaymentResult{},err};if !bytes.Equal(storedHash,hash[:]){return PaymentResult{},ErrPaymentMismatch}
+RETURNING payment_event_id,payload_hash,processed_at,event_type,invoice_id,amount_kopecks,currency`,in.Provider,in.ProviderEventID,in.Type,in.InvoiceID,in.AmountKopecks,in.Currency,hash[:],in.OccurredAt).Scan(&eventID,&storedHash,&processed,&storedType,&storedInvoice,&storedAmount,&storedCurrency);if err!=nil{return PaymentResult{},err}
+	if !bytes.Equal(storedHash,hash[:])||storedType!=in.Type||storedInvoice!=in.InvoiceID||storedAmount!=in.AmountKopecks||storedCurrency!=in.Currency{return PaymentResult{},ErrPaymentMismatch}
 	var invoiceStatus,currency string;var amount,accountID,subscriptionID int64
 	err=tx.QueryRow(ctx,`SELECT status,currency,amount_kopecks,account_id,subscription_id FROM billing_invoices WHERE invoice_id=$1 FOR UPDATE`,in.InvoiceID).Scan(&invoiceStatus,&currency,&amount,&accountID,&subscriptionID);if errors.Is(err,pgx.ErrNoRows){return PaymentResult{},ErrNotFound};if err!=nil{return PaymentResult{},err};if currency!=in.Currency{return PaymentResult{},ErrPaymentMismatch}
 	var subscriptionStatus string;if err=tx.QueryRow(ctx,`SELECT status FROM billing_subscriptions WHERE subscription_id=$1 FOR UPDATE`,subscriptionID).Scan(&subscriptionStatus);err!=nil{return PaymentResult{},err}
