@@ -30,5 +30,6 @@ func registerWidgetRoutes(router chi.Router,apiGuard guard.Middleware,cfg config
 	registerAgencyRoutes(router,apiGuard,pool,webmasterAuth)
 	registerClaimRoutes(router,apiGuard,pool,webmasterAuth)
 	registerReferralRoutes(router,apiGuard,pool,webmasterAuth)
+	registerBillingRoutes(router,apiGuard,pool,webmasterAuth)
 	return nil
 }
