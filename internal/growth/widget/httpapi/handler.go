@@ -30,7 +30,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter,r *http.Request){
 	if r.Method==http.MethodOptions{w.WriteHeader(http.StatusNoContent);return}
 	client:=clientIP(r);if h.KeyLimiter!=nil&&!h.KeyLimiter.Allow(cfg.PublicKey){writeError(w,http.StatusTooManyRequests,"rate_limited");return};if h.ClientLimiter!=nil&&!h.ClientLimiter.Allow(cfg.PublicKey+"|"+client){writeError(w,http.StatusTooManyRequests,"rate_limited");return}
 	var in widget.SearchRequest;if err:=decodeOne(w,r,&in,4<<10);err!=nil{writeError(w,http.StatusBadRequest,"invalid_json");return}
-	out,err:=h.Search.Search(r.Context(),cfg,in);if err!=nil{if errors.Is(err,billing.ErrQuotaExceeded){writeError(w,http.StatusTooManyRequests,"quota_exceeded");return};writeError(w,http.StatusBadRequest,"invalid_query");return}
+	out,err:=h.Search.Search(r.Context(),cfg,in);if err!=nil{if errors.Is(err,billing.ErrQuotaExceeded){writeError(w,http.StatusPaymentRequired,"usage_limit_reached");return};writeError(w,http.StatusBadRequest,"invalid_query");return}
 	writeJSON(w,http.StatusOK,out)
 }
 
