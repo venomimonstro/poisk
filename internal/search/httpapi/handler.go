@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/venomimonstro/poisk/internal/demand"
 	querynorm "github.com/venomimonstro/poisk/internal/query"
 	searchsvc "github.com/venomimonstro/poisk/internal/search"
 )
@@ -19,9 +20,14 @@ type ImpressionRecorder interface {
 	RecordSearchImpressions(context.Context, []string) error
 }
 
+type DemandRecorder interface {
+	Record(context.Context,demand.Snapshot,time.Time)(demand.Gap,error)
+}
+
 type Handler struct {
 	SearchService Searcher
 	Impressions   ImpressionRecorder
+	Demand        DemandRecorder
 }
 
 func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +64,9 @@ func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
 		hosts := make([]string, 0, len(resp.Results))
 		for _, result := range resp.Results { if result.Host != "" { hosts = append(hosts, result.Host) } }
 		_ = h.Impressions.RecordSearchImpressions(r.Context(), hosts)
+	}
+	if h.Demand!=nil{
+		_,_ = h.Demand.Record(r.Context(),demand.Snapshot{Normalized:resp.Normalized,Total:resp.Total,AverageQuality:resp.Coverage.AverageQuality,AverageFreshness:resp.Coverage.AverageFreshness,AverageSpam:resp.Coverage.AverageSpam},time.Now().UTC())
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
