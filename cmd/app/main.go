@@ -18,6 +18,7 @@ import (
 
 	answersvc "github.com/venomimonstro/poisk/internal/answer"
 	answerhttp "github.com/venomimonstro/poisk/internal/answer/httpapi"
+	"github.com/venomimonstro/poisk/internal/billing"
 	crawlerfetcher "github.com/venomimonstro/poisk/internal/crawler/fetcher"
 	crawlersecurity "github.com/venomimonstro/poisk/internal/crawler/security"
 	indexmanticore "github.com/venomimonstro/poisk/internal/indexer/manticore"
@@ -99,6 +100,7 @@ func run() error {
 func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	checker := health.Checker{DB: pool, ManticoreHost: cfg.ManticoreHost, ManticoreSQLPort: cfg.ManticoreSQLPort}
 	webmasterRepo := webmaster.NewRepository(pool)
+	billingRepo := billing.NewRepository(pool)
 	searchBackend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create search backend: %w", err) }
 	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512), BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent)}
@@ -119,7 +121,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	proofFetcher := crawlerfetcher.New(proofCfg, validator)
 	defer proofFetcher.CloseIdleConnections()
 	webmasterService := &webmaster.Service{Store:webmasterRepo,Validator:validator,Verifier:webmaster.Verifier{Fetcher:proofFetcher},SessionTTL:7*24*time.Hour,VerificationTTL:30*time.Minute}
-	webmasterHandler := webmasterhttp.Handler{Service:webmasterService}
+	webmasterHandler := webmasterhttp.Handler{Service:webmasterService,Billing:billingRepo}
 
 	latencyRecorder := platformmetrics.NewLatencyRecorder(4096)
 	apiLimiter := guard.NewLimiter(cfg.APIRatePerSecond, cfg.APIRateBurst, cfg.APIRateClients, cfg.APIRateIdleTTL)
