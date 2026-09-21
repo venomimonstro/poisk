@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"time"
 
+	"github.com/venomimonstro/poisk/internal/billing"
 	querynorm "github.com/venomimonstro/poisk/internal/query"
 	"github.com/venomimonstro/poisk/internal/search/backend"
 )
@@ -12,15 +14,28 @@ import (
 type SearchBackend interface{SearchHost(context.Context,string,string,int)(backend.Result,error)}
 type UsageRecorder interface{RecordUsage(context.Context,int64,int)error}
 
-type Service struct{Backend SearchBackend;Usage UsageRecorder}
+type Service struct{Backend SearchBackend;Usage UsageRecorder;Billing *billing.Repository}
 type SearchRequest struct{Query string `json:"q"`;Limit int `json:"limit,omitempty"`}
 type SearchResult struct{ID int64 `json:"id"`;Title string `json:"title"`;URL string `json:"url"`;Snippet string `json:"snippet"`;Score float64 `json:"score"`}
 type SearchResponse struct{Query string `json:"query"`;Normalized string `json:"normalized"`;Total int64 `json:"total"`;TookMS int64 `json:"took_ms"`;Results []SearchResult `json:"results"`}
 
+const (
+	freeRequestsPerMonth int64 = 1000
+	freeMaxResults int64 = 10
+)
+
 func (s Service) Search(ctx context.Context,cfg Config,req SearchRequest)(SearchResponse,error){
 	if s.Backend==nil{return SearchResponse{},errors.New("widget search backend is not initialized")}
 	norm,err:=querynorm.Normalize(req.Query);if err!=nil{return SearchResponse{},err}
-	limit:=req.Limit;if limit<=0{limit=10};if cfg.MaxResults>0&&limit>cfg.MaxResults{limit=cfg.MaxResults};if limit>20{limit=20}
+	limit:=req.Limit;if limit<=0{limit=10};technicalMax:=cfg.MaxResults;if technicalMax<=0||technicalMax>20{technicalMax=20}
+	if s.Billing!=nil{
+		accountID,err:=s.Billing.AccountIDForUser(ctx,cfg.OwnerUserID);if err!=nil{return SearchResponse{},err}
+		maxQuota,err:=s.Billing.EffectiveQuota(ctx,accountID,"SITE_SEARCH_PRO","max_results",freeMaxResults,time.Now().UTC());if err!=nil{return SearchResponse{},err}
+		if maxQuota.Limit<int64(technicalMax){technicalMax=int(maxQuota.Limit)}
+		if technicalMax<=0{return SearchResponse{},billing.ErrQuotaExceeded}
+		if _,_,err:=s.Billing.ConsumeEffective(ctx,accountID,"SITE_SEARCH_PRO","requests_month",freeRequestsPerMonth,1,time.Now().UTC());err!=nil{return SearchResponse{},err}
+	}
+	if limit>technicalMax{limit=technicalMax};if limit>20{limit=20}
 	queries:=append([]string{norm.Primary},norm.Variants...);var found backend.Result
 	for _,q:=range queries{found,err=s.Backend.SearchHost(ctx,q,cfg.Host,minInt(limit*2,40));if err!=nil{return SearchResponse{},err};if len(found.Hits)>0{break}}
 	hits:=append([]backend.Hit(nil),found.Hits...)
