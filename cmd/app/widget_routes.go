@@ -28,5 +28,6 @@ func registerWidgetRoutes(router chi.Router,apiGuard guard.Middleware,cfg config
 	router.Handle("/api/widget/search",apiGuard.Protect(publicHandler))
 	router.Handle("/api/widget/manage",apiGuard.Protect(manageHandler))
 	registerAgencyRoutes(router,apiGuard,pool,webmasterAuth)
+	registerClaimRoutes(router,apiGuard,pool,webmasterAuth)
 	return nil
 }
