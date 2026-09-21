@@ -41,3 +41,21 @@ func TestAgencyDelegationTenantIsolation(t *testing.T){
 	if sites,err:=repo.ListSites(ctx,agencyOwner,a.ID);err!=nil||len(sites)!=0{t.Fatalf("after revoke sites=%+v err=%v",sites,err)}
 	_ = intruderSite
 }
+
+func TestAgencyManageSubmitRequiresManageAndSameHost(t *testing.T){
+	p:=agencyDB(t);repo:=NewRepository(p);ctx:=context.Background()
+	owner,_:=makeUserSite(t,p,"agency@example.test","agency.test")
+	manager,_:=makeUserSite(t,p,"manager@example.test","manager.test")
+	analyst,_:=makeUserSite(t,p,"analyst@example.test","analyst.test")
+	client,siteID:=makeUserSite(t,p,"client@example.test","client.test")
+	a,err:=repo.Create(ctx,owner,"Agency");if err!=nil{t.Fatal(err)}
+	if err:=repo.AddMemberByEmail(ctx,owner,a.ID,"manager@example.test","MANAGER");err!=nil{t.Fatal(err)}
+	if err:=repo.AddMemberByEmail(ctx,owner,a.ID,"analyst@example.test","ANALYST");err!=nil{t.Fatal(err)}
+	if err:=repo.GrantSite(ctx,client,a.ID,siteID,"READ");err!=nil{t.Fatal(err)}
+	if _,err:=repo.SubmitSitemap(ctx,manager,a.ID,siteID,"https://client.test/sitemap.xml");!errors.Is(err,ErrForbidden){t.Fatalf("READ grant submit err=%v",err)}
+	if err:=repo.GrantSite(ctx,client,a.ID,siteID,"MANAGE");err!=nil{t.Fatal(err)}
+	if _,err:=repo.SubmitURL(ctx,analyst,a.ID,siteID,"https://client.test/page","SUBMIT");!errors.Is(err,ErrForbidden){t.Fatalf("analyst submit err=%v",err)}
+	if _,err:=repo.SubmitURL(ctx,manager,a.ID,siteID,"https://other.test/page","SUBMIT");!errors.Is(err,ErrForbidden){t.Fatalf("foreign host submit err=%v",err)}
+	sitemapID,err:=repo.SubmitSitemap(ctx,manager,a.ID,siteID,"https://client.test/sitemap.xml");if err!=nil||sitemapID<=0{t.Fatalf("sitemap id=%d err=%v",sitemapID,err)}
+	requestID,err:=repo.SubmitURL(ctx,manager,a.ID,siteID,"https://client.test/page","SUBMIT");if err!=nil||requestID<=0{t.Fatalf("request id=%d err=%v",requestID,err)}
+}
