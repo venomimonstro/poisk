@@ -79,8 +79,12 @@ func run() error {
 		return runResourceMonitor(pool)
 	case "demand-worker":
 		return runDemandWorker(pool)
+	case "datahub-worker":
+		return runDataHubWorker(pool)
 	case "demandctl":
 		return runDemandCtl(ctx, pool, os.Args[2:])
+	case "datahubctl":
+		return runDataHubCtl(ctx, pool, os.Args[2:])
 	case "mapctl":
 		return runMapCtl(ctx, pool, os.Args[2:])
 	case "orgctl":
@@ -150,6 +154,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	if err:=registerAddressRoutes(router,apiGuard,cfg,pool);err!=nil{return err}
 	if err:=registerAdminRoutes(router,apiGuard,pool);err!=nil{return err}
 	if err:=registerWidgetRoutes(router,apiGuard,cfg,pool);err!=nil{return err}
+	registerDataHubRoutes(router,apiGuard,pool)
 
 	server := &http.Server{Addr:cfg.Addr,Handler:router,ReadHeaderTimeout:3*time.Second,ReadTimeout:5*time.Second,WriteTimeout:5*time.Second,IdleTimeout:60*time.Second}
 	serverErr := make(chan error, 1)
