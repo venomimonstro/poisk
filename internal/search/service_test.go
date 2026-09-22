@@ -70,6 +70,23 @@ func TestRerankDoesNotMutateBackendHits(t *testing.T) {
 	if original[0].Score != 10 { t.Fatalf("input mutated: %+v", original) }
 }
 
+func TestFreshnessCoverageUsesFetchedAt(t *testing.T){
+	now:=time.Date(2026,9,22,6,0,0,0,time.UTC)
+	hits:=[]backend.Hit{
+		{QualityScore:80,SpamScore:10,FetchedAtUnix:now.Add(-12*time.Hour).Unix()},
+		{QualityScore:60,SpamScore:30,FetchedAtUnix:now.Add(-40*24*time.Hour).Unix()},
+	}
+	s:=coverageSnapshotAt(hits,now)
+	if math.Abs(s.AverageQuality-70)>1e-9{t.Fatalf("quality=%f",s.AverageQuality)}
+	if math.Abs(s.AverageSpam-20)>1e-9{t.Fatalf("spam=%f",s.AverageSpam)}
+	if math.Abs(s.AverageFreshness-72.5)>1e-9{t.Fatalf("freshness=%f",s.AverageFreshness)}
+}
+
+func TestFreshnessUnknownIsNeutral(t *testing.T){
+	now:=time.Date(2026,9,22,6,0,0,0,time.UTC)
+	if got:=freshnessScore(0,now);got!=50{t.Fatalf("freshness=%f",got)}
+}
+
 type blockingBackend struct {
 	calls     atomic.Int32
 	active    atomic.Int32
