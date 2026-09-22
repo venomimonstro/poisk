@@ -34,6 +34,7 @@ func (h Handler) Routes()http.Handler{
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/status",h.Status)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/domains",h.Domains)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/diagnostics",h.DiagnosticsSnapshot)
+		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/mail/gateway-health",h.MailGatewayHealth)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/query-gaps",h.QueryGaps)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/users",h.ConsumerUsers)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/webmaster/sites",h.WebmasterSites)
