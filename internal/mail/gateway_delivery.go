@@ -31,7 +31,6 @@ func (r Repository) ApplyOutboundCallback(ctx context.Context,in OutboundCallbac
 	if r.DB==nil||in.DeliveryID<=0{return false,ErrInvalid};if now.IsZero(){now=time.Now().UTC()};in.SourceEventID=strings.TrimSpace(in.SourceEventID);in.Type=strings.ToUpper(strings.TrimSpace(in.Type));in.RemoteQueueID=strings.TrimSpace(in.RemoteQueueID);in.Code=strings.TrimSpace(in.Code);in.Detail=strings.TrimSpace(in.Detail)
 	if len(in.SourceEventID)<16||len(in.SourceEventID)>160||strings.ContainsAny(in.SourceEventID,"\r\n\x00")||len(in.RemoteQueueID)>255||len(in.Code)>80||len(in.Detail)>1000{return false,ErrInvalid};if in.Type!="DELIVER"&&in.Type!="BOUNCE"{return false,ErrInvalid}
 	tx,err:=r.DB.Begin(ctx);if err!=nil{return false,err};defer func(){_=tx.Rollback(ctx)}()
-	// Serialize the durable MTA event id before checking whether it was already applied.
 	if _,err=tx.Exec(ctx,`SELECT pg_advisory_xact_lock(hashtext($1))`,in.SourceEventID);err!=nil{return false,err}
 	var existingDelivery *int64;var existingType string
 	err=tx.QueryRow(ctx,`SELECT delivery_id,event_type FROM mail_gateway_events WHERE source_event_id=$1`,in.SourceEventID).Scan(&existingDelivery,&existingType)
@@ -46,7 +45,7 @@ func (r Repository) ApplyOutboundCallback(ctx context.Context,in OutboundCallbac
 		if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'DELIVER',$2,jsonb_build_object('remote_queue_id',NULLIF($3,'')))`,in.DeliveryID,attempt,in.RemoteQueueID);err!=nil{return false,err}
 	case "BOUNCE":
 		if status=="BOUNCED"{break};if status!="SUBMITTED"&&status!="DELIVERED"{return false,ErrConflict}
-		if _,err=tx.Exec(ctx,`UPDATE mail_outbound_deliveries SET status='BOUNCED',bounced_at=$2,updated_at=$2,last_error_code=NULLIF($3,''),last_error_detail=NULLIF($4,''), WHERE delivery_id=$1`,in.DeliveryID,now,in.Code,in.Detail);err!=nil{return false,err}
+		if _,err=tx.Exec(ctx,`UPDATE mail_outbound_deliveries SET status='BOUNCED',bounced_at=$2,updated_at=$2,last_error_code=NULLIF($3,''),last_error_detail=NULLIF($4,'') WHERE delivery_id=$1`,in.DeliveryID,now,in.Code,in.Detail);err!=nil{return false,err}
 		if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'BOUNCE',$2,jsonb_build_object('remote_queue_id',NULLIF($3,''),'code',NULLIF($4,'')))`,in.DeliveryID,attempt,in.RemoteQueueID,in.Code);err!=nil{return false,err}
 	}
 	if _,err=tx.Exec(ctx,`INSERT INTO mail_gateway_events(direction,event_type,message_id,delivery_id,mailbox_id,code,source_event_id,details) VALUES('OUTBOUND',$1,$2,$3,$4,NULLIF($5,''),$6,jsonb_build_object('remote_queue_id',NULLIF($7,''),'detail',NULLIF($8,'')))`,in.Type,messageID,in.DeliveryID,mailboxID,in.Code,in.SourceEventID,in.RemoteQueueID,in.Detail);err!=nil{return false,err}
