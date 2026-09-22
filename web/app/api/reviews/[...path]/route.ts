@@ -6,6 +6,7 @@ function allowed(path:string[],method:string){
   if(path.length===3&&path[0]==="places"&&/^\d+$/.test(path[1])&&path[2]==="reviews")return method==="GET";
   if(path.length===3&&path[0]==="places"&&/^\d+$/.test(path[1])&&path[2]==="rating")return method==="GET";
   if(path.length===3&&path[0]==="places"&&/^\d+$/.test(path[1])&&path[2]==="permissions")return method==="GET";
+  if(path.length===3&&path[0]==="places"&&/^\d+$/.test(path[1])&&path[2]==="my-review")return method==="GET";
   if(path.length===3&&path[0]==="places"&&/^\d+$/.test(path[1])&&path[2]==="review")return method==="PUT";
   if(path.length===2&&path[0]==="reviews"&&/^\d+$/.test(path[1]))return method==="DELETE";
   if(path.length===3&&path[0]==="reviews"&&/^\d+$/.test(path[1])&&path[2]==="report")return method==="POST";
