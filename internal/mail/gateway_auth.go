@@ -7,7 +7,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -44,13 +43,11 @@ func VerifyGatewayRequest(secret []byte,eventID string,timestampRaw string,body 
 
 func (r Repository) ClaimGatewayEvent(ctx context.Context,eventID,bodyHash string,now time.Time) error {
 	if r.DB==nil{return ErrInvalid};eventID=strings.TrimSpace(eventID);bodyHash=strings.ToLower(strings.TrimSpace(bodyHash));if len(eventID)<16||len(eventID)>160||len(bodyHash)!=64{return ErrInvalid};if _,err:=hex.DecodeString(bodyHash);err!=nil{return ErrInvalid};if now.IsZero(){now=time.Now().UTC()}
-	tx,err:=r.DB.Begin(ctx);if err!=nil{return err};defer func(){_=tx.Rollback(ctx)}()
-	var existing string
-	err=tx.QueryRow(ctx,`SELECT body_sha256 FROM mail_gateway_replay_guard WHERE event_id=$1 FOR UPDATE`,eventID).Scan(&existing)
-	if err==nil{if subtle.ConstantTimeCompare([]byte(existing),[]byte(bodyHash))==1{return ErrGatewayReplay};return ErrGatewayMismatch}
-	if !errors.Is(err,pgx.ErrNoRows){return err}
-	_,err=tx.Exec(ctx,`INSERT INTO mail_gateway_replay_guard(event_id,body_sha256,received_at,expires_at) VALUES($1,$2,$3,$4)`,eventID,bodyHash,now.UTC(),now.UTC().Add(24*time.Hour));if err!=nil{return fmt.Errorf("claim gateway event: %w",err)}
-	return tx.Commit(ctx)
+	var inserted string
+	err:=r.DB.QueryRow(ctx,`INSERT INTO mail_gateway_replay_guard(event_id,body_sha256,received_at,expires_at) VALUES($1,$2,$3,$4) ON CONFLICT(event_id) DO NOTHING RETURNING event_id`,eventID,bodyHash,now.UTC(),now.UTC().Add(24*time.Hour)).Scan(&inserted)
+	if err==nil{return nil};if !errors.Is(err,pgx.ErrNoRows){return err}
+	var existing string;if err=r.DB.QueryRow(ctx,`SELECT body_sha256 FROM mail_gateway_replay_guard WHERE event_id=$1`,eventID).Scan(&existing);err!=nil{return err}
+	if subtle.ConstantTimeCompare([]byte(existing),[]byte(bodyHash))==1{return ErrGatewayReplay};return ErrGatewayMismatch
 }
 
 func (r Repository) PruneGatewayReplayGuard(ctx context.Context,now time.Time) error {if r.DB==nil{return ErrInvalid};if now.IsZero(){now=time.Now().UTC()};_,err:=r.DB.Exec(ctx,`DELETE FROM mail_gateway_replay_guard WHERE expires_at<$1`,now.UTC());return err}
