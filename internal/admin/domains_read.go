@@ -18,7 +18,7 @@ type DomainRow struct {
 
 func (s Service) ListDomains(ctx context.Context,session Session,query string,limit int)([]DomainRow,error){
 	if s.Store==nil||s.Store.db==nil{return nil,errors.New("admin service is not initialized")}
-	if err:=s.RequireRole(session,"OPERATOR","ANALYST","SUPPORT");err!=nil{return nil,err}
+	if err:=s.RequireRole(session,"OPERATOR","ANALYST","VIEWER","SUPPORT");err!=nil{return nil,err}
 	query=strings.ToLower(strings.TrimSpace(query));if len(query)>255{return nil,ErrInvalidCredential};if limit<=0{limit=20};if limit>50{limit=50}
 	rows,err:=s.Store.db.Query(ctx,`SELECT domain_id,host,status,policy,trust_level,quality_score,demand_score FROM domains
 WHERE $1='' OR lower(host) LIKE '%'||$1||'%' ORDER BY CASE WHEN lower(host)=$1 THEN 0 ELSE 1 END,host LIMIT $2`,query,limit);if err!=nil{return nil,err};defer rows.Close()
