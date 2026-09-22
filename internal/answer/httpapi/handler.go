@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	answersvc "github.com/venomimonstro/poisk/internal/answer"
 	querynorm "github.com/venomimonstro/poisk/internal/query"
@@ -18,14 +19,20 @@ type CitationRecorder interface {
 	RecordAnswerCitations(context.Context, []string) error
 }
 
+type MetricsRecorder interface {
+	Record(context.Context, answersvc.Response, bool, time.Time) error
+}
+
 type Handler struct {
 	AnswerService Answerer
 	Citations     CitationRecorder
+	Metrics       MetricsRecorder
 }
 
 func (h Handler) Answer(w http.ResponseWriter, r *http.Request) {
 	if h.AnswerService == nil {
 		writeError(w, http.StatusServiceUnavailable, "answer_unavailable")
+		h.record(r, answersvc.Response{}, true)
 		return
 	}
 	resp, err := h.AnswerService.Answer(r.Context(), answersvc.Request{Query: r.URL.Query().Get("q")})
@@ -42,6 +49,7 @@ func (h Handler) Answer(w http.ResponseWriter, r *http.Request) {
 		default:
 			writeError(w, http.StatusBadGateway, "answer_backend_error")
 		}
+		h.record(r, answersvc.Response{}, true)
 		return
 	}
 	if h.Citations != nil && resp.Available && len(resp.Sources) > 0 {
@@ -52,6 +60,13 @@ func (h Handler) Answer(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = json.NewEncoder(w).Encode(resp)
+	h.record(r, resp, false)
+}
+
+func (h Handler) record(r *http.Request,resp answersvc.Response,failed bool){
+	if h.Metrics==nil{return}
+	ctx,cancel:=context.WithTimeout(context.WithoutCancel(r.Context()),75*time.Millisecond);defer cancel()
+	_ = h.Metrics.Record(ctx,resp,failed,time.Now().UTC())
 }
 
 func writeError(w http.ResponseWriter, status int, code string) {
