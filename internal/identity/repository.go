@@ -58,7 +58,11 @@ func (r *Repository) UserByEmail(ctx context.Context,email string)(User,error){
 }
 
 func (r *Repository) UpdatePasswordHash(ctx context.Context,userID int64,hash string)error{
-	tag,err:=r.db.Exec(ctx,`UPDATE consumer_users SET password_hash=$2,updated_at=now() WHERE user_id=$1`,userID,hash);if err!=nil{return err};if tag.RowsAffected()!=1{return ErrNotFound};return nil
+	if r==nil||r.db==nil||userID<=0||strings.TrimSpace(hash)==""{return ErrNotFound}
+	tx,err:=r.db.BeginTx(ctx,pgx.TxOptions{});if err!=nil{return err};defer func(){_=tx.Rollback(ctx)}()
+	tag,err:=tx.Exec(ctx,`UPDATE consumer_users SET password_hash=$2,updated_at=now() WHERE user_id=$1`,userID,hash);if err!=nil{return err};if tag.RowsAffected()!=1{return ErrNotFound}
+	if _,err=tx.Exec(ctx,`UPDATE webmaster_users SET password_hash=$2,updated_at=now() WHERE consumer_user_id=$1`,userID,hash);err!=nil{return err}
+	return tx.Commit(ctx)
 }
 
 func (r *Repository) RecordLoginFailure(ctx context.Context,email string)error{
@@ -116,7 +120,7 @@ func (r *Repository) EnsureWebmasterProfile(ctx context.Context,consumerID int64
 	var email,hash,status string
 	if err=tx.QueryRow(ctx,`SELECT email,password_hash,status FROM consumer_users WHERE user_id=$1 FOR UPDATE`,consumerID).Scan(&email,&hash,&status);err!=nil{return 0,ErrNotFound}
 	wmStatus:="ACTIVE";if status!="ACTIVE"{wmStatus="DISABLED"}
-	err=tx.QueryRow(ctx,`INSERT INTO webmaster_users(email,password_hash,status,consumer_user_id) VALUES($1,$2,$3,$4) ON CONFLICT(consumer_user_id) DO UPDATE SET updated_at=now() RETURNING user_id`,email,hash,wmStatus,consumerID).Scan(&id);if err!=nil{return 0,err}
+	err=tx.QueryRow(ctx,`INSERT INTO webmaster_users(email,password_hash,status,consumer_user_id) VALUES($1,$2,$3,$4) ON CONFLICT(consumer_user_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,status=EXCLUDED.status,updated_at=now() RETURNING user_id`,email,hash,wmStatus,consumerID).Scan(&id);if err!=nil{return 0,err}
 	if err=tx.Commit(ctx);err!=nil{return 0,err};return id,nil
 }
 
