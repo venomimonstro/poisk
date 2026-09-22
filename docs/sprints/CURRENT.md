@@ -1,56 +1,57 @@
 # CURRENT SPRINT
 
-**Sprint:** 20 — Data Hub
+**Sprint:** 21 — Capacity Gate
 **Status:** IN_PROGRESS
 
 ## Goal
-Построить Data Hub поверх уже существующих canonical Search/GEO/Webmaster/Demand данных: city/category pages, organization and website directories, privacy-safe trends, first-party aggregates and bounded programmatic SEO pages. Страницы должны быть детерминированными и строиться только из canonical данных; AI summaries допускаются только как вспомогательный слой и не могут быть единственным содержимым страницы.
+Проверить фактическую производительность архитектуры на крупном корпусе и сформировать измеряемую модель роста до 10 млн документов. Решения о разделении сервисов, репликах или sharding допускаются только после benchmark и ADR; Sprint 21 не меняет архитектуру заранее.
 
 ## Depends On
 - Sprint 00–08 — PASS
 - Sprint 09–16 — PASS (code/static gate where noted in reports)
 - Sprint 17 — PASS (code/static gate)
 - Sprint 18 — PASS (code/static gate)
-- Sprint 19 — PASS (code/static gate; report created)
+- Sprint 19 — PASS (code/static gate)
+- Sprint 20 — PASS (code/static gate; report created)
 
 ## Allowed Work
-- canonical city/category landing pages from organizations and address data
-- organization directories and website/domain directories
-- deterministic slugs and stable page identities
-- privacy-bounded first-party trend aggregates from qualified Demand data
-- directory filters and bounded pagination
-- canonical/meta/robots/sitemap support for generated pages
-- page-quality gates that prevent thin/duplicate programmatic pages
-- deterministic statistics and related-page linking
-- auxiliary generated summaries only when backed by canonical facts
-- freshness/version metadata and incremental rebuilds
-- tests, diagnostics and operator controls for Data Hub publication
+- benchmark tooling for Search API and direct Manticore retrieval
+- 1M-document benchmark preparation and corpus diagnostics
+- target 10M capacity projection based on measured 1M/current-corpus values
+- QPS, P50/P95/P99, error-rate and timeout measurement
+- CPU/RAM/disk observation and database/index size reporting
+- crawler/extractor/index throughput and queue/outbox backlog measurement
+- Data Hub materialization throughput measurement
+- GEO/address endpoint benchmark
+- capacity snapshots stored as immutable benchmark records
+- explicit thresholds and bottleneck classification
+- ADR generation from measured benchmark results
+- operator commands and runbook for repeatable benchmark execution
+- tests for percentile math, projections, limits and decision rules
 
 ## Forbidden Work
-- Sprint 21 capacity benchmark/sharding decisions
-- mass generation of thin pages without minimum data thresholds
-- fabricated organizations, addresses, ratings, reviews or trends
-- AI-generated facts not present in canonical data
-- storing raw per-user search histories, IP or User-Agent for trends
-- paid ranking or paid inclusion in organic directories
-- separate Elasticsearch/OpenSearch index
-- Redis/Kafka/RabbitMQ
-- Kubernetes
+- automatic architecture migration before benchmark evidence
+- adding Kubernetes, Kafka, RabbitMQ or Redis
+- adding Elasticsearch/OpenSearch
+- speculative Manticore sharding or replicas without ADR
+- benchmark writes against production canonical data without explicit isolated-mode confirmation
+- fabricated benchmark results
+- treating projected 10M numbers as measured values
 - GitHub Actions/CI
 
 ## Definition of Done
-- [ ] stable Data Hub page model and deterministic slug rules exist
-- [ ] city/category pages are backed by canonical organizations/addresses only
-- [ ] organization and website directories support bounded filters/pagination
-- [ ] thin-page quality gate prevents publication below minimum evidence thresholds
-- [ ] duplicate city/category combinations resolve to one canonical page identity
-- [ ] trend signals use privacy-bounded aggregated Demand data only
-- [ ] generated pages include canonical/meta/robots and sitemap-ready metadata
-- [ ] related-page links are deterministic and bounded
-- [ ] publication/version/freshness state supports incremental rebuild and rollback
-- [ ] auxiliary summaries cannot introduce facts outside canonical aggregates
-- [ ] no paid-plan/billing state changes organic directory ordering
-- [ ] tests cover slug stability, thin-page suppression, pagination bounds and deterministic aggregates
-- [ ] no Sprint 21 scope is pulled in
+- [ ] repeatable Search benchmark measures QPS, P50/P95/P99 and errors
+- [ ] GEO/address benchmark uses the same bounded benchmark harness
+- [ ] current corpus/document/index/database sizes are captured
+- [ ] crawler/index throughput and crawl/outbox backlog are captured
+- [ ] Data Hub materialization throughput is measurable
+- [ ] 1M-document benchmark workflow is documented and isolated from production canonical state
+- [ ] 10M model clearly distinguishes projection from measured results
+- [ ] benchmark snapshots are immutable and comparable
+- [ ] bottlenecks are classified by CPU/RAM/disk/search/database/queue signals
+- [ ] capacity decision produces an ADR choice: stay single node / move crawler / shard search / add replica
+- [ ] decision rules do not silently change architecture
+- [ ] tests cover percentile calculations, error-rate, projections and decision thresholds
+- [ ] no new infrastructure component is added before ADR
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 20 report created
+- [ ] Sprint 21 report created
