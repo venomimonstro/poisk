@@ -120,7 +120,8 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512), BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent)}
 	searchHandler := searchhttp.Handler{SearchService: searchService, Impressions: webmasterRepo, Demand: demandRepo}
 	answerService := &answersvc.Service{Search: searchService, MinConfidence: answersvc.DefaultMinConfidence}
-	answerHandler := answerhttp.Handler{AnswerService: answerService, Citations: webmasterRepo}
+	answerMetrics := answersvc.MetricsRepository{DB:pool}
+	answerHandler := answerhttp.Handler{AnswerService: answerService, Citations: webmasterRepo, Metrics: answerMetrics}
 	trackingHandler := webmasterhttp.TrackingHandler{Recorder: webmasterRepo}
 	mapHandler := maphttp.Handler{Maps: newMapService(pool)}
 
