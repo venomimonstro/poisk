@@ -17,12 +17,22 @@ import (
 )
 
 func runCapacityCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
-	if len(args)==0{return errors.New("usage: capacityctl benchmark <label> | status | adr <snapshot_id> <choice> <decided_by> <rationale>")}
+	if len(args)==0{return errors.New("usage: capacityctl benchmark <label> | status [limit] | adr <snapshot_id> <choice> <decided_by> <rationale>")}
 	repo:=capacity.NewRepository(pool)
 	switch args[0]{
 	case "benchmark":
 		if len(args)<2{return errors.New("usage: capacityctl benchmark <label>")}
 		return runCapacityBenchmark(ctx,repo,args[1])
+	case "status":
+		limit:=10
+		if len(args)>1{v,err:=strconv.Atoi(args[1]);if err!=nil||v<1||v>100{return errors.New("invalid status limit")};limit=v}
+		items,err:=repo.RecentSnapshots(ctx,limit);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");return enc.Encode(map[string]any{"snapshots":items})
+	case "adr":
+		if len(args)<5{return errors.New("usage: capacityctl adr <snapshot_id> <choice> <decided_by> <rationale>")}
+		id,err:=strconv.ParseInt(args[1],10,64);if err!=nil||id<=0{return errors.New("invalid snapshot_id")}
+		choice:=strings.TrimSpace(args[2]);decidedBy:=strings.TrimSpace(args[3]);rationale:=strings.TrimSpace(strings.Join(args[4:]," "))
+		decisionID,markdown,err:=repo.CreateADR(ctx,id,choice,decidedBy,rationale);if err!=nil{return err}
+		fmt.Fprintf(os.Stdout,"decision_id=%d\n\n%s",decisionID,markdown);return nil
 	default:
 		return fmt.Errorf("capacityctl command %q is not implemented",args[0])
 	}
@@ -34,7 +44,7 @@ func runCapacityBenchmark(ctx context.Context,repo *capacity.Repository,label st
 	duration,err:=envDurationSeconds("CAPACITY_DURATION_SECONDS",60,1,1800);if err!=nil{return err}
 	concurrency,err:=envInt("CAPACITY_CONCURRENCY",16,1,512);if err!=nil{return err}
 	targetQPS,err:=envFloat("CAPACITY_TARGET_QPS",100,0,1_000_000);if err!=nil{return err}
-	manticoreBytes,err:=envInt64Required("CAPACITY_MANTICORE_BYTES",0);if err!=nil{return fmt.Errorf("CAPACITY_MANTICORE_BYTES must contain a measured Manticore data size: %w",err)}
+	manticoreBytes,err:=envInt64Required("CAPACITY_MANTICORE_BYTES",1);if err!=nil{return fmt.Errorf("CAPACITY_MANTICORE_BYTES must contain a measured Manticore data size: %w",err)}
 	searchURLs,err:=searchURLsFromFile(base,os.Getenv("CAPACITY_SEARCH_QUERIES"));if err!=nil{return err}
 	geoURLs,err:=endpointURLsFromFile(base,os.Getenv("CAPACITY_GEO_URLS"),"/api/geo/");if err!=nil{return err}
 	addressURLs,err:=endpointURLsFromFile(base,os.Getenv("CAPACITY_ADDRESS_URLS"),"/api/address/");if err!=nil{return err}
