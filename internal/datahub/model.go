@@ -73,15 +73,28 @@ func Evaluate(t PageType,e Evidence)Gate{
 	score+=min(10,e.DistinctSources*2)
 	score+=int(q/10)
 	if score>100{score=100}
-	minOrg:=5
-	switch t{case PageCity:minOrg=10;case PageCategory:minOrg=10;case PageCityCategory:minOrg=5;case PageOrganization:minOrg=1;case PageWebsite:minOrg=1;default:return Gate{Reason:"invalid_page_type"}}
-	if e.Organizations<minOrg{return Gate{Score:score,Reason:"insufficient_organizations"}}
-	if t==PageCityCategory||t==PageCity||t==PageCategory{
+
+	switch t{
+	case PageCity,PageCategory,PageCityCategory:
+		minOrg:=5;if t==PageCity||t==PageCategory{minOrg=10}
+		if e.Organizations<minOrg{return Gate{Score:score,Reason:"insufficient_organizations"}}
 		if e.WithAddress<minOrg/2{return Gate{Score:score,Reason:"insufficient_address_evidence"}}
 		if e.AverageQuality<35{return Gate{Score:score,Reason:"low_average_quality"}}
+		if score<45{return Gate{Score:score,Reason:"low_evidence_score"}}
+		return Gate{Publish:true,Score:score,Reason:"ok"}
+	case PageOrganization:
+		if e.Organizations!=1{return Gate{Score:score,Reason:"invalid_organization_evidence"}}
+		if e.AverageQuality<40{return Gate{Score:score,Reason:"low_average_quality"}}
+		if e.WithWebsite==0&&e.WithAddress==0{return Gate{Score:score,Reason:"insufficient_identity_evidence"}}
+		if e.DistinctSources<1{return Gate{Score:score,Reason:"insufficient_source_evidence"}}
+		return Gate{Publish:true,Score:score,Reason:"ok"}
+	case PageWebsite:
+		if e.Organizations<1{return Gate{Score:score,Reason:"no_linked_organizations"}}
+		if e.WithWebsite<1{return Gate{Score:score,Reason:"missing_website_evidence"}}
+		if e.AverageQuality<30{return Gate{Score:score,Reason:"low_average_quality"}}
+		return Gate{Publish:true,Score:score,Reason:"ok"}
+	default:return Gate{Reason:"invalid_page_type"}
 	}
-	if score<45{return Gate{Score:score,Reason:"low_evidence_score"}}
-	return Gate{Publish:true,Score:score,Reason:"ok"}
 }
 
 func min(a,b int)int{if a<b{return a};return b}
