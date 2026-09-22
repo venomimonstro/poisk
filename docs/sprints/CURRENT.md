@@ -1,57 +1,63 @@
 # CURRENT SPRINT
 
-**Sprint:** 24 — Maps Product + Reviews
+**Sprint:** 25 — Mail Core
 **Status:** IN_PROGRESS
 
 ## Goal
-Сделать публичный Maps продукт на существующем OSM/PMTiles/MapLibre/GEO/address stack и добавить безопасные first-party отзывы организаций, связанные с canonical consumer identity и verified organization claims.
+Создать безопасную first-party почту и внутреннюю систему сообщений на canonical consumer accounts без преждевременного SMTP/IMAP gateway.
 
 ## Depends On
-- Sprint 00–08 — PASS
-- Sprint 09–21 — PASS (code/static gate where noted in reports)
+- Sprint 00–21 — PASS (code/static gate where noted in reports)
 - Sprint 22 — PASS code/static gate; runtime/browser/migration evidence remains external launch gate
 - Sprint 23 — PASS code/static gate; runtime/recovery/capacity evidence remains external launch gate
+- Sprint 24 — PASS code/static gate; runtime/browser/migration evidence remains external launch gate
 
 ## Allowed Work
-- public Yandex-Maps-like layout: search/sidebar/map/card, mobile-first
-- GEO/address autocomplete and nearby/category/viewport search using existing canonical services
-- organization card with canonical name/category/address/phone/website/hours when evidence exists
-- authenticated first-party organization reviews
-- one active review per consumer user/place with revision history
-- deterministic rating aggregate from visible first-party reviews only
-- verified claimed organization owner replies
-- report/moderation lifecycle and immutable moderation history
-- rate limits / anti-abuse / content length bounds
-- safe plain-text review/reply rendering and stored-XSS tests
-- tenant/claim isolation tests
-- review aggregates must not alter paid or organic ranking without a future explicit ADR
-- Admin moderation queue using existing Admin RBAC + CSRF + preview/apply where mutation is critical
+- canonical mailbox and unique internal address tied to `consumer_users`
+- Inbox / Sent / Drafts / Trash / Spam system folders
+- messages, recipients, threads, read/star flags
+- compose / save draft / send / reply / forward for internal recipients
+- transactionally atomic internal delivery
+- plain text plus sanitized HTML representation
+- attachment metadata, SHA-256 content hash, owner/storage quotas
+- bounded local attachment blob storage using opaque IDs; original filename never becomes a filesystem path
+- attachment download with non-executable headers and tenant authorization
+- PostgreSQL full-text search for mailbox search
+- send / recipient / storage rate limits
+- delete / restore / trash / retention semantics
+- strict mailbox tenant isolation / IDOR / stored-XSS / path traversal tests
+- consumer Mail UI using existing canonical account/session/CSRF layer
+- Admin read-only Mail diagnostics necessary for abuse/support, without exposing message bodies by default
 
 ## Forbidden Work
-- importing third-party review text without explicit source/legal design
-- using review rating as organic Search/Maps ranking input
-- anonymous review creation
-- multiple active ratings by the same consumer for one organization
-- owner replies without an active verified organization claim
-- raw HTML in reviews/replies
-- exposing consumer email/profile identifiers publicly
-- Mail implementation (Sprint 25+)
+- Internet SMTP/IMAP ingress or egress
+- open relay or anonymous sending
+- DKIM/SPF/DMARC implementation (Sprint 26)
+- external email addresses as deliverable recipients
+- using attachment filename as storage path
+- automatic execution or inline active rendering of unsafe attachment types
+- exposing absolute storage paths
 - Redis/Kafka/RabbitMQ/Kubernetes/Elasticsearch/OpenSearch
 - GitHub Actions/CI
+- changing Search/GEO organic ranking
+- Sprint 26+ scope
 
 ## Definition of Done
-- [ ] review/revision/report/moderation schema is migration-safe and bounded
-- [ ] one active review per consumer/place is enforced by database constraints
-- [ ] review edits create immutable revision history
-- [ ] visible rating aggregates exclude hidden/deleted/rejected reviews
-- [ ] public review API never exposes private consumer identity
-- [ ] create/edit/delete/report mutations require consumer session + CSRF
-- [ ] owner reply requires verified active organization claim server-side
-- [ ] Admin can inspect moderation queue and permissioned actions are audited
-- [ ] stored-XSS/IDOR/claim-isolation/rating-recompute tests exist
-- [ ] public Maps UI has search/sidebar/map/company card/reviews and responsive mobile layout
-- [ ] existing GEO/address/PMTiles stack is reused, not duplicated
-- [ ] reviews do not affect organic ranking
-- [ ] no Sprint 25+ scope is pulled in
+- [ ] mailbox/address schema is migration-safe and one canonical mailbox belongs to one consumer
+- [ ] system folders exist and tenant ownership is enforced server-side
+- [ ] internal send is atomic: sender Sent + every recipient Inbox or none
+- [ ] recipient enumeration is bounded and invalid recipients cannot create partial delivery
+- [ ] drafts can be created/updated/sent without cross-tenant access
+- [ ] reply and forward preserve thread/provenance without trusting client-owned mailbox IDs
+- [ ] message body plain text is bounded; HTML is sanitized before storage/rendering
+- [ ] attachment storage uses opaque IDs + SHA-256 + quotas; no user filename reaches filesystem path
+- [ ] attachment download uses authorization + safe Content-Disposition/Content-Type/X-Content-Type-Options
+- [ ] mailbox search uses PostgreSQL FTS with bounded query/limit
+- [ ] send/recipient/storage abuse limits are enforced atomically
+- [ ] trash/delete/restore semantics are explicit and bounded
+- [ ] Mail API mutations require canonical consumer session + CSRF
+- [ ] IDOR/tenant-isolation/stored-XSS/path-traversal/quota tests exist
+- [ ] Mail UI supports Inbox/Sent/Drafts/Trash/Spam, compose, thread reading and search
+- [ ] no SMTP/IMAP or Sprint 26 work is pulled in
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 24 report created
+- [ ] Sprint 25 report created
