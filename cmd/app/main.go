@@ -77,6 +77,8 @@ func run() error {
 		return runAddressIndexer(cfg, pool)
 	case "resource-monitor":
 		return runResourceMonitor(pool)
+	case "demand-worker":
+		return runDemandWorker(pool)
 	case "mapctl":
 		return runMapCtl(ctx, pool, os.Args[2:])
 	case "orgctl":
