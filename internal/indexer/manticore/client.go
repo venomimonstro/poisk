@@ -95,6 +95,26 @@ type rawResultSet struct {
 	Error string                       `json:"error"`
 }
 
+func (c *Client) CountDocuments(ctx context.Context) (int64, error) {
+	body, err := c.execSQL(ctx, "SELECT COUNT(*) AS count FROM "+WebIndex)
+	if err != nil { return 0, err }
+	var sets []rawResultSet
+	if err := json.Unmarshal(body, &sets); err != nil { return 0, fmt.Errorf("decode document count: %w", err) }
+	if len(sets) == 0 || len(sets[0].Data) == 0 { return 0, errors.New("manticore document count result is empty") }
+	raw, ok := sets[0].Data[0]["count"]
+	if !ok { return 0, errors.New("manticore document count result missing count") }
+	var count int64
+	if err := json.Unmarshal(raw, &count); err == nil {
+		if count < 0 { return 0, errors.New("manticore document count is negative") }
+		return count, nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil { return 0, fmt.Errorf("decode document count value: %w", err) }
+	count, err = strconv.ParseInt(strings.TrimSpace(text), 10, 64)
+	if err != nil || count < 0 { return 0, errors.New("invalid manticore document count") }
+	return count, nil
+}
+
 func (c *Client) CurrentVersion(ctx context.Context, id int64) (int64, bool, error) {
 	if id <= 0 { return 0, false, errors.New("document id must be positive") }
 	body, err := c.execSQL(ctx, "SELECT entity_version FROM "+WebIndex+" WHERE id="+strconv.FormatInt(id, 10)+" LIMIT 1")
