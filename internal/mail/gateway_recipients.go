@@ -22,7 +22,7 @@ func replaceMessageRecipients(ctx context.Context,tx pgx.Tx,messageID int64,item
  UNION ALL
  SELECT mb.mailbox_id,a.address,1 AS priority FROM mail_external_aliases a JOIN mailboxes mb ON mb.mailbox_id=a.mailbox_id WHERE lower(a.address)=lower($1) AND a.status='ACTIVE' AND mb.status='ACTIVE'
 ) x ORDER BY priority LIMIT 1`,address).Scan(&mailboxID,&canonical)
-		if err==nil{if _,err=tx.Exec(ctx,`INSERT INTO mail_recipients(message_id,recipient_mailbox_id,recipient_type,ordinal) VALUES($1,$2,$3,$4)`,messageID,mailboxID,kind,i+1);err!=nil{return err};continue}
+		if err==nil{if _,err=tx.Exec(ctx,`INSERT INTO mail_recipients(message_id,recipient_mailbox_id,recipient_type,ordinal,delivery_address) VALUES($1,$2,$3,$4,$5)`,messageID,mailboxID,kind,i+1,canonical);err!=nil{return err};continue}
 		if !errors.Is(err,pgx.ErrNoRows){return err}
 		lower:=strings.ToLower(address);if strings.HasSuffix(lower,"@internal.poisk"){return ErrNotFound}
 		external,err:=NormalizeExternalAddress(address);if err!=nil{return err};at:=strings.LastIndexByte(external,'@');domain:=external[at+1:]
@@ -33,7 +33,7 @@ func replaceMessageRecipients(ctx context.Context,tx pgx.Tx,messageID int64,item
 }
 
 func lockSendRecipients(ctx context.Context,tx pgx.Tx,messageID int64)([]internalSendRecipient,[]externalSendRecipient,error){
-	rows,err:=tx.Query(ctx,`SELECT mb.mailbox_id,mb.address,r.recipient_type,mb.status FROM mail_recipients r JOIN mailboxes mb ON mb.mailbox_id=r.recipient_mailbox_id WHERE r.message_id=$1 ORDER BY r.recipient_type,r.ordinal FOR SHARE OF r,mb`,messageID);if err!=nil{return nil,nil,err}
+	rows,err:=tx.Query(ctx,`SELECT mb.mailbox_id,r.delivery_address,r.recipient_type,mb.status FROM mail_recipients r JOIN mailboxes mb ON mb.mailbox_id=r.recipient_mailbox_id WHERE r.message_id=$1 ORDER BY r.recipient_type,r.ordinal FOR SHARE OF r,mb`,messageID);if err!=nil{return nil,nil,err}
 	internal:=[]internalSendRecipient{};for rows.Next(){var x internalSendRecipient;if err=rows.Scan(&x.MailboxID,&x.Address,&x.Kind,&x.Status);err!=nil{rows.Close();return nil,nil,err};if x.Status!="ACTIVE"{rows.Close();return nil,nil,ErrConflict};internal=append(internal,x)};if err=rows.Err();err!=nil{rows.Close();return nil,nil,err};rows.Close()
 	extRows,err:=tx.Query(ctx,`SELECT external_recipient_id,address,recipient_type FROM mail_external_recipients WHERE message_id=$1 ORDER BY recipient_type,ordinal FOR SHARE`,messageID);if err!=nil{return nil,nil,err}
 	external:=[]externalSendRecipient{};for extRows.Next(){var x externalSendRecipient;if err=extRows.Scan(&x.ID,&x.Address,&x.Kind);err!=nil{extRows.Close();return nil,nil,err};external=append(external,x)};if err=extRows.Err();err!=nil{extRows.Close();return nil,nil,err};extRows.Close()
