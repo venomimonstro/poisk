@@ -1,6 +1,6 @@
 CREATE TABLE organization_reviews (
     review_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    place_id BIGINT NOT NULL REFERENCES organizations(place_id) ON DELETE CASCADE,
+    place_id BIGINT NOT NULL REFERENCES organizations(place_id) ON DELETE RESTRICT,
     consumer_user_id BIGINT NOT NULL REFERENCES consumer_users(user_id) ON DELETE RESTRICT,
     rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
     body TEXT NOT NULL CHECK (length(body) BETWEEN 10 AND 4000),
@@ -18,7 +18,7 @@ CREATE INDEX idx_org_reviews_status ON organization_reviews(status,updated_at DE
 
 CREATE TABLE organization_review_revisions (
     revision_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    review_id BIGINT NOT NULL REFERENCES organization_reviews(review_id) ON DELETE CASCADE,
+    review_id BIGINT NOT NULL REFERENCES organization_reviews(review_id) ON DELETE RESTRICT,
     version BIGINT NOT NULL CHECK (version > 0),
     rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
     body TEXT NOT NULL CHECK (length(body) BETWEEN 10 AND 4000),
@@ -31,16 +31,14 @@ CREATE TABLE organization_review_revisions (
 );
 CREATE INDEX idx_org_review_revisions_review ON organization_review_revisions(review_id,version DESC);
 
-CREATE OR REPLACE FUNCTION organization_review_version_and_snapshot() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION organization_review_version() RETURNS trigger AS $$
 BEGIN
-    IF TG_OP='UPDATE' THEN
-        NEW.version := OLD.version + 1;
-        NEW.updated_at := now();
-    END IF;
+    NEW.version := OLD.version + 1;
+    NEW.updated_at := now();
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-CREATE TRIGGER trg_org_review_version BEFORE UPDATE ON organization_reviews FOR EACH ROW EXECUTE FUNCTION organization_review_version_and_snapshot();
+CREATE TRIGGER trg_org_review_version BEFORE UPDATE ON organization_reviews FOR EACH ROW EXECUTE FUNCTION organization_review_version();
 
 CREATE OR REPLACE FUNCTION organization_review_snapshot_after() RETURNS trigger AS $$
 BEGIN
@@ -57,6 +55,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_org_review_revisions_no_update BEFORE UPDATE OR DELETE ON organization_review_revisions FOR EACH ROW EXECUTE FUNCTION organization_review_revisions_immutable();
+
+CREATE OR REPLACE FUNCTION organization_reviews_no_delete() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'organization_reviews must be soft-deleted';
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_org_reviews_no_delete BEFORE DELETE ON organization_reviews FOR EACH ROW EXECUTE FUNCTION organization_reviews_no_delete();
 
 CREATE TABLE organization_review_stats (
     place_id BIGINT PRIMARY KEY REFERENCES organizations(place_id) ON DELETE CASCADE,
@@ -76,16 +81,15 @@ END;
 $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION organization_review_stats_trigger() RETURNS trigger AS $$
 BEGIN
-    PERFORM refresh_organization_review_stats(COALESCE(NEW.place_id,OLD.place_id));
-    IF TG_OP='UPDATE' AND NEW.place_id<>OLD.place_id THEN PERFORM refresh_organization_review_stats(OLD.place_id); END IF;
-    RETURN COALESCE(NEW,OLD);
+    PERFORM refresh_organization_review_stats(NEW.place_id);
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-CREATE TRIGGER trg_org_review_stats AFTER INSERT OR UPDATE OR DELETE ON organization_reviews FOR EACH ROW EXECUTE FUNCTION organization_review_stats_trigger();
+CREATE TRIGGER trg_org_review_stats AFTER INSERT OR UPDATE ON organization_reviews FOR EACH ROW EXECUTE FUNCTION organization_review_stats_trigger();
 
 CREATE TABLE organization_review_reports (
     report_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    review_id BIGINT NOT NULL REFERENCES organization_reviews(review_id) ON DELETE CASCADE,
+    review_id BIGINT NOT NULL REFERENCES organization_reviews(review_id) ON DELETE RESTRICT,
     reporter_user_id BIGINT NOT NULL REFERENCES consumer_users(user_id) ON DELETE RESTRICT,
     reason TEXT NOT NULL CHECK (reason IN ('SPAM','ABUSE','FAKE','CONFLICT','OTHER')),
     details TEXT CHECK (details IS NULL OR length(details) <= 1000),
@@ -93,14 +97,14 @@ CREATE TABLE organization_review_reports (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     resolved_at TIMESTAMPTZ,
     resolved_by_admin_id BIGINT REFERENCES admin_users(admin_id) ON DELETE SET NULL,
-    CHECK ((status='OPEN' AND resolved_at IS NULL) OR status<>'OPEN')
+    CHECK ((status='OPEN' AND resolved_at IS NULL) OR (status<>'OPEN' AND resolved_at IS NOT NULL))
 );
 CREATE UNIQUE INDEX uq_org_review_report_open ON organization_review_reports(review_id,reporter_user_id) WHERE status='OPEN';
 CREATE INDEX idx_org_review_reports_queue ON organization_review_reports(status,created_at,report_id);
 
 CREATE TABLE organization_review_replies (
     reply_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    review_id BIGINT NOT NULL UNIQUE REFERENCES organization_reviews(review_id) ON DELETE CASCADE,
+    review_id BIGINT NOT NULL UNIQUE REFERENCES organization_reviews(review_id) ON DELETE RESTRICT,
     claim_id BIGINT NOT NULL REFERENCES organization_claims(claim_id) ON DELETE RESTRICT,
     owner_consumer_user_id BIGINT NOT NULL REFERENCES consumer_users(user_id) ON DELETE RESTRICT,
     body TEXT NOT NULL CHECK (length(body) BETWEEN 2 AND 3000),
@@ -113,7 +117,7 @@ CREATE INDEX idx_org_review_replies_visible ON organization_review_replies(revie
 
 CREATE TABLE organization_review_moderation_events (
     event_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    review_id BIGINT NOT NULL REFERENCES organization_reviews(review_id) ON DELETE CASCADE,
+    review_id BIGINT NOT NULL REFERENCES organization_reviews(review_id) ON DELETE RESTRICT,
     admin_id BIGINT REFERENCES admin_users(admin_id) ON DELETE SET NULL,
     action TEXT NOT NULL CHECK (action IN ('HIDE','SHOW','REJECT','REPORT_RESOLVE','REPORT_DISMISS')),
     reason TEXT NOT NULL CHECK (length(reason) BETWEEN 2 AND 240),
