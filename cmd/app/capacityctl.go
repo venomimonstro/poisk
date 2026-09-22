@@ -16,6 +16,14 @@ import (
 	"github.com/venomimonstro/poisk/internal/capacity"
 )
 
+type capacityServerMetrics struct{
+	CPUPercent float64 `json:"cpu_percent"`
+	RAMPercent float64 `json:"ram_percent"`
+	DiskPercent float64 `json:"disk_percent"`
+	DiskAvailableBytes int64 `json:"disk_available_bytes"`
+	Source string `json:"source"`
+}
+
 func runCapacityCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
 	if len(args)==0{return errors.New("usage: capacityctl benchmark <label> | status [limit] | adr <snapshot_id> <choice> <decided_by> <rationale>")}
 	repo:=capacity.NewRepository(pool)
@@ -41,6 +49,7 @@ func runCapacityCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
 func runCapacityBenchmark(ctx context.Context,repo *capacity.Repository,label string)error{
 	mode:=strings.ToUpper(strings.TrimSpace(envDefault("CAPACITY_MODE","LIVE_READONLY")))
 	base:=strings.TrimRight(envDefault("CAPACITY_BASE_URL","http://backend:8080"),"/")
+	if err:=validateCapacityBaseURL(base);err!=nil{return err}
 	duration,err:=envDurationSeconds("CAPACITY_DURATION_SECONDS",60,1,1800);if err!=nil{return err}
 	concurrency,err:=envInt("CAPACITY_CONCURRENCY",16,1,512);if err!=nil{return err}
 	targetQPS,err:=envFloat("CAPACITY_TARGET_QPS",100,0,1_000_000);if err!=nil{return err}
@@ -55,23 +64,34 @@ func runCapacityBenchmark(ctx context.Context,repo *capacity.Repository,label st
 	dbBefore,err:=repo.CollectDatabase(ctx);if err!=nil{return err}
 	if dbBefore.Corpus.IndexedDocuments<=0{return errors.New("capacity benchmark requires a non-empty indexed corpus")}
 	if mode=="ISOLATED_1M"&&dbBefore.Corpus.IndexedDocuments<1_000_000{return fmt.Errorf("ISOLATED_1M requires at least 1,000,000 indexed documents, got %d",dbBefore.Corpus.IndexedDocuments)}
-	resourceMark:=capacity.MarkResources()
+	clientMark:=capacity.MarkResources()
 	search,err:=capacity.RunHTTPBenchmark(ctx,capacity.HTTPBenchmarkConfig{URLs:searchURLs,Duration:duration,Concurrency:concurrency,RequestTimeout:3*time.Second});if err!=nil{return err}
 	geo,err:=capacity.RunHTTPBenchmark(ctx,capacity.HTTPBenchmarkConfig{URLs:geoURLs,Duration:duration,Concurrency:concurrency,RequestTimeout:3*time.Second});if err!=nil{return err}
 	address,err:=capacity.RunHTTPBenchmark(ctx,capacity.HTTPBenchmarkConfig{URLs:addressURLs,Duration:duration,Concurrency:concurrency,RequestTimeout:3*time.Second});if err!=nil{return err}
-	resources:=capacity.MeasureResources(resourceMark,envDefault("CAPACITY_DISK_PATH","/"))
+	clientResources:=capacity.MeasureResources(clientMark,envDefault("CAPACITY_DISK_PATH","/"))
+	serverMetrics,serverMeasured,err:=loadCapacityServerMetrics(os.Getenv("CAPACITY_SERVER_METRICS_FILE"));if err!=nil{return err}
 	dbAfter,err:=repo.CollectDatabase(ctx);if err!=nil{return err}
 	storage:=capacity.StorageSnapshot{DatabaseBytes:dbAfter.DatabaseBytes,ManticoreBytes:manticoreBytes}
 	projection,err:=capacity.ProjectStorage(dbAfter.Corpus.IndexedDocuments,10_000_000,storage);if err!=nil{return err}
-	signals:=capacity.Signals{Search:search,GEO:geo,Address:address,CPUPercent:resources.CPUPercent,RAMPercent:resources.RAMPercent,DiskPercent:resources.DiskPercent,CrawlReady:dbAfter.Queues.CrawlReady,OutboxReady:dbAfter.Queues.OutboxReady,CrawlPerSecond:dbAfter.Throughput.CrawlPerSecond,IndexPerSecond:dbAfter.Throughput.IndexPerSecond,TargetQPS:targetQPS,ProjectedBytes:projection.ProjectedTotalBytes,AvailableDiskBytes:resources.DiskAvailableBytes}
+	signals:=capacity.Signals{Search:search,GEO:geo,Address:address,CrawlReady:dbAfter.Queues.CrawlReady,OutboxReady:dbAfter.Queues.OutboxReady,CrawlPerSecond:dbAfter.Throughput.CrawlPerSecond,IndexPerSecond:dbAfter.Throughput.IndexPerSecond,TargetQPS:targetQPS,ProjectedBytes:projection.ProjectedTotalBytes}
+	if serverMeasured{signals.CPUPercent=serverMetrics.CPUPercent;signals.RAMPercent=serverMetrics.RAMPercent;signals.DiskPercent=serverMetrics.DiskPercent;signals.AvailableDiskBytes=serverMetrics.DiskAvailableBytes}
 	bottlenecks:=capacity.Classify(signals)
-	resourceMap:=map[string]any{"cpu_percent":resources.CPUPercent,"ram_percent":resources.RAMPercent,"disk_percent":resources.DiskPercent,"memory_current_bytes":resources.MemoryCurrentBytes,"memory_limit_bytes":resources.MemoryLimitBytes,"disk_total_bytes":resources.DiskTotalBytes,"disk_available_bytes":resources.DiskAvailableBytes,"cpu_cores":resources.CPUCores,"probe_warnings":resources.ProbeWarnings}
+	resourceMap:=map[string]any{"benchmark_client":clientResources,"server_measurements_provided":serverMeasured}
+	if serverMeasured{resourceMap["server"]=serverMetrics}else{resourceMap["server_warning"]="Server CPU/RAM/disk were not provided. Client-container cgroup values are retained only as benchmark-generator diagnostics and are not used for server bottleneck classification."}
 	queueMap:=map[string]any{"before":dbBefore.Queues,"after":dbAfter.Queues,"throughput":dbAfter.Throughput,"corpus":dbAfter.Corpus}
 	snapshotID,err:=repo.CompleteRun(ctx,capacity.FinalSnapshot{RunID:runID,MeasuredDocuments:dbAfter.Corpus.IndexedDocuments,MeasuredAt:time.Now().UTC(),Workload:map[string]capacity.WorkloadMetrics{"search":search,"geo":geo,"address":address},Resources:resourceMap,Queues:queueMap,Storage:storage,Projection:projection,Bottlenecks:bottlenecks});if err!=nil{return err}
 	failed=false
-	out:=map[string]any{"run_id":runID,"snapshot_id":snapshotID,"mode":mode,"workload":map[string]capacity.WorkloadMetrics{"search":search,"geo":geo,"address":address},"database":dbAfter,"resources":resources,"projection_10m":projection,"bottlenecks":bottlenecks};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");return enc.Encode(out)
+	out:=map[string]any{"run_id":runID,"snapshot_id":snapshotID,"mode":mode,"workload":map[string]capacity.WorkloadMetrics{"search":search,"geo":geo,"address":address},"database":dbAfter,"resources":resourceMap,"projection_10m":projection,"bottlenecks":bottlenecks};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");return enc.Encode(out)
 }
 
+func loadCapacityServerMetrics(path string)(capacityServerMetrics,bool,error){
+	path=strings.TrimSpace(path);if path==""{return capacityServerMetrics{},false,nil}
+	raw,err:=os.ReadFile(path);if err!=nil{return capacityServerMetrics{},false,err};if len(raw)>16<<10{return capacityServerMetrics{},false,errors.New("server metrics file is too large")}
+	var m capacityServerMetrics;if err:=json.Unmarshal(raw,&m);err!=nil{return capacityServerMetrics{},false,err};m.Source=strings.TrimSpace(m.Source)
+	if m.CPUPercent<0||m.CPUPercent>100||m.RAMPercent<0||m.RAMPercent>100||m.DiskPercent<0||m.DiskPercent>100||m.DiskAvailableBytes<0||m.Source==""||len(m.Source)>256{return capacityServerMetrics{},false,errors.New("invalid server metrics file")}
+	return m,true,nil
+}
+func validateCapacityBaseURL(raw string)error{u,err:=url.Parse(raw);if err!=nil||u.Host==""||(u.Scheme!="http"&&u.Scheme!="https")||u.User!=nil||u.RawQuery!=""||u.Fragment!=""{return errors.New("invalid CAPACITY_BASE_URL")};return nil}
 func searchURLsFromFile(base,path string)([]string,error){lines,err:=boundedLines(path);if err!=nil{return nil,fmt.Errorf("search queries: %w",err)};out:=make([]string,0,len(lines));for _,q:=range lines{v:=url.Values{};v.Set("q",q);v.Set("limit","10");out=append(out,base+"/api/search?"+v.Encode())};return out,nil}
 func endpointURLsFromFile(base,path,prefix string)([]string,error){lines,err:=boundedLines(path);if err!=nil{return nil,err};out:=make([]string,0,len(lines));for _,p:=range lines{if !strings.HasPrefix(p,prefix)||strings.HasPrefix(p,"//"){return nil,fmt.Errorf("benchmark path must start with %s",prefix)};u,err:=url.Parse(p);if err!=nil||u.IsAbs()||u.Host!=""{return nil,errors.New("benchmark endpoint must be a relative API path")};out=append(out,base+p)};return out,nil}
 func boundedLines(path string)([]string,error){path=strings.TrimSpace(path);if path==""{return nil,errors.New("benchmark file path is required")};f,err:=os.Open(path);if err!=nil{return nil,err};defer f.Close();s:=bufio.NewScanner(f);s.Buffer(make([]byte,1024),4096);out:=make([]string,0,256);for s.Scan(){line:=strings.TrimSpace(s.Text());if line==""||strings.HasPrefix(line,"#"){continue};if len([]rune(line))>512{return nil,errors.New("benchmark line exceeds 512 characters")};out=append(out,line);if len(out)>10000{return nil,errors.New("benchmark file exceeds 10000 cases")}};if err:=s.Err();err!=nil{return nil,err};if len(out)==0{return nil,errors.New("benchmark file has no cases")};return out,nil}
