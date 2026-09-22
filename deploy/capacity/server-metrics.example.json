@@ -1,0 +1,7 @@
+{
+  "cpu_percent": 0,
+  "ram_percent": 0,
+  "disk_percent": 0,
+  "disk_available_bytes": 0,
+  "source": "replace with measured aggregate server values for the same benchmark window"
+}
