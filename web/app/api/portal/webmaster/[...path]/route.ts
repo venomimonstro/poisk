@@ -4,6 +4,7 @@ const internalBase = (process.env.API_INTERNAL_BASE_URL || "http://localhost:808
 
 function allowed(path: string[], method: string) {
   if (path.length === 1 && path[0] === "sites") return method === "GET" || method === "POST";
+  if (path.length === 1 && path[0] === "usage") return method === "GET";
   if (path.length < 3 || path[0] !== "sites" || !/^\d+$/.test(path[1])) return false;
   const action = path.slice(2).join("/");
   if (["verification", "verify", "sitemaps", "urls"].includes(action)) return method === "POST";
