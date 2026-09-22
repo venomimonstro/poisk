@@ -1,12 +1,12 @@
 package gatewayhttp
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -40,12 +40,12 @@ func (h Handler) verify(w http.ResponseWriter,r *http.Request,max int64)([]byte,
 	return body,true
 }
 
-func decodeOne(body []byte,dst any)error{dec:=json.NewDecoder(strings.NewReader(string(body)));dec.DisallowUnknownFields();if err:=dec.Decode(dst);err!=nil{return err};var extra any;err:=dec.Decode(&extra);if errors.Is(err,io.EOF){return nil};if err==nil{return errors.New("trailing json")};return err}
+func decodeOne(body []byte,dst any)error{dec:=json.NewDecoder(bytes.NewReader(body));dec.DisallowUnknownFields();if err:=dec.Decode(dst);err!=nil{return err};var extra any;err:=dec.Decode(&extra);if errors.Is(err,io.EOF){return nil};if err==nil{return errors.New("trailing json")};return err}
 
 func (h Handler) Recipient(w http.ResponseWriter,r *http.Request){
 	body,ok:=h.verify(w,r,8<<10);if !ok{return};var in recipientRequest;if err:=decodeOne(body,&in);err!=nil{writeError(w,http.StatusBadRequest,"invalid_json");return}
-	mailboxID,err:=h.Inbound.ResolveRecipient(r.Context(),in.Recipient);if err!=nil{if errors.Is(err,mailcore.ErrNotFound){writeError(w,http.StatusNotFound,"recipient_not_found");return};writeError(w,http.StatusBadRequest,"invalid_recipient");return}
-	writeJSON(w,http.StatusOK,map[string]any{"accepted":true,"mailbox_id":mailboxID})
+	if _,err:=h.Inbound.ResolveRecipient(r.Context(),in.Recipient);err!=nil{if errors.Is(err,mailcore.ErrNotFound){writeError(w,http.StatusNotFound,"recipient_not_found");return};writeError(w,http.StatusBadRequest,"invalid_recipient");return}
+	writeJSON(w,http.StatusOK,map[string]any{"accepted":true})
 }
 
 func (h Handler) InboundMessage(w http.ResponseWriter,r *http.Request){
