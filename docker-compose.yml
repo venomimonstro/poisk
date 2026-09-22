@@ -168,8 +168,10 @@ services:
       - .env
     environment:
       RESOURCE_DISK_PATH: /data-watch
+      MAIL_BLOB_DIR: /mail-blobs
     volumes:
       - ./:/data-watch:ro
+      - mail_blob_data:/mail-blobs
     depends_on:
       postgres:
         condition: service_healthy
