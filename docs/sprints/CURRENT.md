@@ -1,63 +1,68 @@
 # CURRENT SPRINT
 
-**Sprint:** 25 — Mail Core
+**Sprint:** 26 — Internet Mail Gateway
 **Status:** IN_PROGRESS
 
 ## Goal
-Создать безопасную first-party почту и внутреннюю систему сообщений на canonical consumer accounts без преждевременного SMTP/IMAP gateway.
+Расширить first-party Mail Core безопасной отправкой и приёмом интернет-почты через отдельную проверенную MTA-границу, не превращая Go-приложение в самописный публичный SMTP relay.
 
 ## Depends On
-- Sprint 00–21 — PASS (code/static gate where noted in reports)
-- Sprint 22 — PASS code/static gate; runtime/browser/migration evidence remains external launch gate
-- Sprint 23 — PASS code/static gate; runtime/recovery/capacity evidence remains external launch gate
-- Sprint 24 — PASS code/static gate; runtime/browser/migration evidence remains external launch gate
+- Sprint 00–24 — PASS (code/static gate where noted in reports)
+- Sprint 25 — PASS code/static gate; runtime/browser/migration evidence remains external launch gate
+
+## Architecture Boundary
+- PostgreSQL + Go Mail Core остаются source of truth для mailbox/message/thread/items.
+- Публичный SMTP принимает/передаёт отдельный MTA service (Postfix-compatible boundary); application API не слушает публичный SMTP порт.
+- MTA не получает consumer session/password hashes и не пишет напрямую в canonical Mail tables.
+- Inbound передаётся в приложение только через authenticated internal gateway contract.
+- Outbound попадает в MTA только из durable server-side queue; браузер никогда не управляет SMTP host/credentials.
 
 ## Allowed Work
-- canonical mailbox and unique internal address tied to `consumer_users`
-- Inbox / Sent / Drafts / Trash / Spam system folders
-- messages, recipients, threads, read/star flags
-- compose / save draft / send / reply / forward for internal recipients
-- transactionally atomic internal delivery
-- plain text plus sanitized HTML representation
-- attachment metadata, SHA-256 content hash, owner/storage quotas
-- bounded local attachment blob storage using opaque IDs; original filename never becomes a filesystem path
-- attachment download with non-executable headers and tenant authorization
-- PostgreSQL full-text search for mailbox search
-- send / recipient / storage rate limits
-- delete / restore / trash / retention semantics
-- strict mailbox tenant isolation / IDOR / stored-XSS / path traversal tests
-- consumer Mail UI using existing canonical account/session/CSRF layer
-- Admin read-only Mail diagnostics necessary for abuse/support, without exposing message bodies by default
+- external recipient representation alongside existing internal recipients
+- durable outbound queue with idempotency, lease/retry/dead states and bounded exponential backoff
+- trusted-MTA inbound ingestion contract with HMAC/rotatable shared secret or equivalent internal authentication
+- bounded RFC 5322/MIME parsing after MTA acceptance
+- Internet From/To/Cc/Reply-To metadata and provenance without exposing BCC
+- inbound/outbound attachment reuse through existing opaque blob/quota subsystem
+- Postfix-compatible deployment boundary and non-open-relay configuration
+- DKIM signing at MTA boundary; private key only as mounted secret/file, never PostgreSQL/browser
+- SPF and DMARC DNS configuration/check tooling/documentation
+- message size/recipient/rate/domain safety limits
+- bounce/delivery-status persistence without leaking provider internals to other tenants
+- external addresses in Mail UI compose/read views
+- Admin aggregate gateway health: queue/retry/dead/bounce/inbound counts, no bodies by default
+- integration/security tests for relay prevention, HMAC replay, MIME limits, external-recipient isolation and idempotent delivery
 
 ## Forbidden Work
-- Internet SMTP/IMAP ingress or egress
-- open relay or anonymous sending
-- DKIM/SPF/DMARC implementation (Sprint 26)
-- external email addresses as deliverable recipients
-- using attachment filename as storage path
-- automatic execution or inline active rendering of unsafe attachment types
-- exposing absolute storage paths
+- custom internet-facing SMTP protocol implementation in the application
+- open relay / unauthenticated arbitrary outbound sending
+- storing SMTP/DKIM secrets in PostgreSQL, source code or browser-visible config
+- accepting inbound gateway calls without authentication/replay protection
+- automatic inline execution/rendering of active MIME/HTML/attachments
+- IMAP/POP3 server implementation in this sprint
+- wildcard external forwarding rules
 - Redis/Kafka/RabbitMQ/Kubernetes/Elasticsearch/OpenSearch
 - GitHub Actions/CI
 - changing Search/GEO organic ranking
-- Sprint 26+ scope
+- Sprint 27+ scope
 
 ## Definition of Done
-- [ ] mailbox/address schema is migration-safe and one canonical mailbox belongs to one consumer
-- [ ] system folders exist and tenant ownership is enforced server-side
-- [ ] internal send is atomic: sender Sent + every recipient Inbox or none
-- [ ] recipient enumeration is bounded and invalid recipients cannot create partial delivery
-- [ ] drafts can be created/updated/sent without cross-tenant access
-- [ ] reply and forward preserve thread/provenance without trusting client-owned mailbox IDs
-- [ ] message body plain text is bounded; HTML is sanitized before storage/rendering
-- [ ] attachment storage uses opaque IDs + SHA-256 + quotas; no user filename reaches filesystem path
-- [ ] attachment download uses authorization + safe Content-Disposition/Content-Type/X-Content-Type-Options
-- [ ] mailbox search uses PostgreSQL FTS with bounded query/limit
-- [ ] send/recipient/storage abuse limits are enforced atomically
-- [ ] trash/delete/restore semantics are explicit and bounded
-- [ ] Mail API mutations require canonical consumer session + CSRF
-- [ ] IDOR/tenant-isolation/stored-XSS/path-traversal/quota tests exist
-- [ ] Mail UI supports Inbox/Sent/Drafts/Trash/Spam, compose, thread reading and search
-- [ ] no SMTP/IMAP or Sprint 26 work is pulled in
+- [ ] internal-only delivery from Sprint 25 remains backwards-compatible
+- [ ] external recipients persist separately and cannot be mistaken for local mailbox identities
+- [ ] outbound external delivery is durable, idempotent and all queue state transitions are auditable
+- [ ] queue leasing is crash-safe with retry/dead-letter semantics
+- [ ] browser cannot select relay host/credentials or bypass per-account limits
+- [ ] inbound gateway requires authenticated, replay-protected MTA request
+- [ ] inbound MIME size/part/header/address limits are enforced before canonical persistence
+- [ ] inbound message is delivered only to an existing ACTIVE local mailbox/alias
+- [ ] external HTML is sanitized or rendered as inert text; unsafe active content is never executed
+- [ ] attachments reuse opaque storage IDs, SHA-256 and quota enforcement
+- [ ] no open relay; MTA relay rules are explicit and default-deny
+- [ ] DKIM secret stays outside DB/source/browser and signing boundary is documented/testable
+- [ ] SPF/DMARC required records can be checked deterministically
+- [ ] bounces and final delivery failures become bounded canonical events/statuses
+- [ ] Mail UI can compose to external addresses and distinguish delivery status
+- [ ] Admin can see aggregate gateway health without message bodies/recipient lists
+- [ ] SMTP/IMAP secrets are not logged
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 25 report created
+- [ ] Sprint 26 report created
