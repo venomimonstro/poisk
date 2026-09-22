@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import QueryGapsPanel from "./query-gaps";
 
 type AdminMe = { admin_id: number; email: string; role: string; expires_at: string };
 type Queue = { ready: number; leased: number; retry: number; dead: number };
@@ -156,6 +157,7 @@ export default function AdminPage() {
       </div>
     </section>}
     {ops?.outbox?.length ? <section style={card}><strong>Index outbox</strong>{ops.outbox.map(item => <div key={item.entity_type}>{item.entity_type}: ready {item.ready}, leased {item.leased}, retry {item.retry}, dead {item.dead}</div>)}</section> : null}
+    <QueryGapsPanel csrf={csrf} operator={operator} />
     <section style={card}>
       <h2>Domains</h2>
       <div style={{ display: "flex", gap: 8 }}><input style={input} placeholder="host" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void searchDomains(); }} /><button style={button} onClick={() => void searchDomains()}>Найти</button></div>
