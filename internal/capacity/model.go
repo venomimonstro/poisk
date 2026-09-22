@@ -54,6 +54,8 @@ type Signals struct{
 	TargetQPS float64 `json:"target_qps"`
 	ProjectedBytes int64 `json:"projected_bytes"`
 	AvailableDiskBytes int64 `json:"available_disk_bytes"`
+	DBIndexedDocuments int64 `json:"db_indexed_documents"`
+	ManticoreDocuments int64 `json:"manticore_documents"`
 }
 
 type Bottleneck struct{Code string `json:"code"`;Severity string `json:"severity"`;Detail string `json:"detail"`}
@@ -89,7 +91,7 @@ func scaledBytes(v int64,f float64)int64{if v<=0||f<=0{return 0};x:=float64(v)*f
 func safeAdd(a,b int64)int64{if a>math.MaxInt64-b{return math.MaxInt64};return a+b}
 
 func Classify(s Signals)[]Bottleneck{
-	out:=make([]Bottleneck,0,8)
+	out:=make([]Bottleneck,0,9)
 	if s.Search.P95MS>1000||s.Search.ErrorRate>0.01{out=append(out,Bottleneck{"SEARCH_SLO","HIGH","Search P95 exceeds 1000ms or error rate exceeds 1%."})}else if s.Search.P95MS>500{out=append(out,Bottleneck{"SEARCH_LATENCY","MEDIUM","Search P95 exceeds 500ms."})}
 	if s.CPUPercent>=85{out=append(out,Bottleneck{"CPU_PRESSURE","HIGH","Measured server CPU utilization is at or above 85%."})}else if s.CPUPercent>=70{out=append(out,Bottleneck{"CPU_PRESSURE","MEDIUM","Measured server CPU utilization is at or above 70%."})}
 	if s.RAMPercent>=90{out=append(out,Bottleneck{"RAM_PRESSURE","HIGH","Measured server memory utilization is at or above 90%."})}else if s.RAMPercent>=80{out=append(out,Bottleneck{"RAM_PRESSURE","MEDIUM","Measured server memory utilization is at or above 80%."})}
@@ -98,7 +100,13 @@ func Classify(s Signals)[]Bottleneck{
 	if s.CrawlReady>50000{out=append(out,Bottleneck{"CRAWL_BACKLOG","MEDIUM","Crawler READY/RETRY backlog exceeds 50,000 URLs."})}
 	if s.TargetQPS>0&&s.Search.QPS>0&&s.Search.QPS<s.TargetQPS{out=append(out,Bottleneck{"QPS_CAPACITY","HIGH","Measured Search QPS is below the declared target QPS."})}
 	if s.ProjectedBytes>0&&s.AvailableDiskBytes>0&&s.ProjectedBytes>int64(float64(s.AvailableDiskBytes)*0.80){out=append(out,Bottleneck{"PROJECTED_STORAGE","HIGH","Projected 10M index+database bytes exceed 80% of currently available disk."})}
+	if indexCountMismatch(s.DBIndexedDocuments,s.ManticoreDocuments){out=append(out,Bottleneck{"INDEX_COUNT_MISMATCH","HIGH","PostgreSQL indexed URL count and Manticore web document count differ by more than 1% (minimum tolerance 100 documents)."})}
 	return out
+}
+
+func indexCountMismatch(db,index int64)bool{
+	if db<0||index<0{return true};if db==0&&index==0{return false}
+	diff:=db-index;if diff<0{diff=-diff};base:=db;if index>base{base=index};tolerance:=base/100;if tolerance<100{tolerance=100};return diff>tolerance
 }
 
 // RecommendChoice is advisory only. It never applies infrastructure changes and
