@@ -67,6 +67,31 @@ p { margin: 0 auto 28px; max-width: 650px; line-height: 1.6; color: #5b6472; }
 .geoCardActions a { padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 9px; text-decoration: none; font-size: 13px; font-weight: 700; }
 .geoCardActions a:hover { border-color: #111827; }
 
+.dataHubPage { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 80px; }
+.dataHubBreadcrumbs { display: flex; gap: 8px; align-items: center; margin-bottom: 36px; color: #6b7280; font-size: 13px; }
+.dataHubBreadcrumbs a { text-decoration: none; }
+.dataHubBreadcrumbs a:hover { color: #111827; text-decoration: underline; }
+.dataHubHero { padding: 34px; border: 1px solid #e5e7eb; border-radius: 24px; background: #fff; box-shadow: 0 10px 36px rgba(0,0,0,.045); }
+.dataHubHero h1 { margin: 8px 0 16px; max-width: 900px; font-size: clamp(34px, 5vw, 58px); }
+.dataHubHero p { margin: 0; max-width: 800px; }
+.dataHubEyebrow { color: #6b7280; font-size: 12px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.dataHubStats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.dataHubStats span { padding: 7px 10px; border-radius: 999px; background: #f3f4f6; color: #4b5563; font-size: 12px; }
+.dataHubSection { margin-top: 42px; }
+.dataHubSection h2 { margin: 0 0 18px; font-size: 28px; letter-spacing: -.02em; }
+.dataHubSection > p { margin: 0 0 16px; max-width: 820px; }
+.dataHubGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.dataHubCard { padding: 20px; border: 1px solid #e5e7eb; border-radius: 16px; background: #fff; }
+.dataHubCard h3 { margin: 0 0 8px; font-size: 18px; }
+.dataHubCard p { margin: 0 0 14px; color: #6b7280; }
+.dataHubCardMeta { color: #6b7280; font-size: 12px; }
+.dataHubCardLinks { display: flex; gap: 12px; margin-top: 14px; }
+.dataHubCardLinks a, .dataHubSection > p a { color: #174ea6; text-decoration: none; }
+.dataHubCardLinks a:hover, .dataHubSection > p a:hover { text-decoration: underline; }
+.dataHubRelated { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.dataHubRelated a { color: #174ea6; text-decoration: none; }
+.dataHubRelated a:hover { text-decoration: underline; }
+
 @media (max-width: 640px) {
   .shell { padding: 22px 14px; }
   .shellResults { padding-top: 16px; }
@@ -83,4 +108,9 @@ p { margin: 0 auto 28px; max-width: 650px; line-height: 1.6; color: #5b6472; }
   .mapHeader { top: 10px; left: 10px; right: 58px; gap: 10px; padding: 10px 12px; }
   .mapVersion { display: none; }
   .geoCard { left: 10px; bottom: 28px; width: calc(100vw - 20px); padding: 17px; }
+  .dataHubPage { width: min(100% - 20px, 1120px); padding-top: 18px; }
+  .dataHubBreadcrumbs { margin-bottom: 20px; }
+  .dataHubHero { padding: 22px 18px; border-radius: 18px; }
+  .dataHubHero h1 { font-size: 36px; }
+  .dataHubSection { margin-top: 30px; }
 }
