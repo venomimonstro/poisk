@@ -20,7 +20,7 @@ type Handler struct{Repo mailcore.Repository;Store mailcore.AttachmentStore;Iden
 
 func (h Handler) Routes()http.Handler{
 	r:=chi.NewRouter();r.Use(h.requireAuth)
-	r.Get("/me",h.Me);r.Get("/folders/{kind}",h.ListFolder);r.Get("/items/{itemID}",h.GetItem);r.Get("/items/{itemID}/attachments",h.ListItemAttachments);r.Get("/search",h.Search);r.Get("/attachments/{attachmentID}",h.DownloadAttachment)
+	r.Get("/me",h.Me);r.Get("/folders/{kind}",h.ListFolder);r.Get("/items/{itemID}",h.GetItem);r.Get("/items/{itemID}/attachments",h.ListItemAttachments);r.Get("/search",h.Search);r.Get("/attachments/{attachmentID}",h.DownloadAttachment);r.Get("/drafts/{messageID}",h.GetDraft)
 	r.With(h.requireCSRF).Post("/drafts",h.CreateDraft);r.With(h.requireCSRF).Put("/drafts/{messageID}",h.UpdateDraft);r.With(h.requireCSRF).Post("/drafts/{messageID}/send",h.SendDraft);r.With(h.requireCSRF).Post("/drafts/{messageID}/attachments",h.UploadAttachment);r.With(h.requireCSRF).Delete("/drafts/{messageID}/attachments/{attachmentID}",h.DetachAttachment)
 	r.With(h.requireCSRF).Post("/items/{itemID}/read",h.SetRead);r.With(h.requireCSRF).Post("/items/{itemID}/star",h.SetStar);r.With(h.requireCSRF).Post("/items/{itemID}/trash",h.Trash);r.With(h.requireCSRF).Post("/items/{itemID}/restore",h.Restore);r.With(h.requireCSRF).Post("/items/{itemID}/spam",h.Spam)
 	return r
@@ -31,7 +31,8 @@ func (h Handler) requireCSRF(next http.Handler)http.Handler{return http.HandlerF
 func parseID(raw string)(int64,error){v,err:=strconv.ParseInt(raw,10,64);if err!=nil||v<=0{return 0,mailcore.ErrInvalid};return v,nil}
 func decode(w http.ResponseWriter,r *http.Request,dst any,max int64)error{r.Body=http.MaxBytesReader(w,r.Body,max);dec:=json.NewDecoder(r.Body);dec.DisallowUnknownFields();if err:=dec.Decode(dst);err!=nil{return err};var extra any;err:=dec.Decode(&extra);if errors.Is(err,io.EOF){return nil};if err==nil{return errors.New("trailing json")};return err}
 func writeJSON(w http.ResponseWriter,status int,v any){w.Header().Set("Content-Type","application/json; charset=utf-8");w.Header().Set("Cache-Control","no-store");w.Header().Set("X-Content-Type-Options","nosniff");w.WriteHeader(status);_=json.NewEncoder(w).Encode(v)}
-func writeError(w http.ResponseWriter,status int,code string){writeJSON(w,status,map[string]string{"error":code})}
+func writeError(w http.ResponseWriter,status int,code string){writeJSON(w,status,map[string]string{"error":code})
+}
 func writeRepoError(w http.ResponseWriter,err error){switch{case errors.Is(err,mailcore.ErrInvalid):writeError(w,400,"invalid_request");case errors.Is(err,mailcore.ErrNotFound):writeError(w,404,"not_found");case errors.Is(err,mailcore.ErrForbidden):writeError(w,403,"forbidden");case errors.Is(err,mailcore.ErrConflict):writeError(w,409,"conflict");case errors.Is(err,mailcore.ErrRateLimited):writeError(w,429,"rate_limited");default:writeError(w,503,"mail_unavailable")}}
 
 func (h Handler) Me(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);box,err:=h.Repo.EnsureMailbox(r.Context(),a.User.ID);if err!=nil{writeRepoError(w,err);return};writeJSON(w,200,box)}
@@ -42,6 +43,7 @@ func (h Handler) Search(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);
 
 type draftRequest struct{Subject string `json:"subject"`;BodyText string `json:"body_text"`;Recipients []mailcore.Recipient `json:"recipients"`;Provenance string `json:"provenance"`;ParentMessageID *int64 `json:"parent_message_id"`}
 func toDraft(in draftRequest)mailcore.DraftInput{return mailcore.DraftInput{Subject:in.Subject,BodyText:in.BodyText,Recipients:in.Recipients,Provenance:in.Provenance,ParentMessageID:in.ParentMessageID}}
+func (h Handler) GetDraft(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);id,err:=parseID(chi.URLParam(r,"messageID"));if err!=nil{writeError(w,400,"invalid_message_id");return};out,err:=h.Repo.GetDraftEdit(r.Context(),a.User.ID,id);if err!=nil{writeRepoError(w,err);return};writeJSON(w,200,out)}
 func (h Handler) CreateDraft(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);var in draftRequest;if err:=decode(w,r,&in,512<<10);err!=nil{writeError(w,400,"invalid_json");return};out,err:=h.Repo.CreateDraft(r.Context(),a.User.ID,toDraft(in));if err!=nil{writeRepoError(w,err);return};writeJSON(w,201,out)}
 func (h Handler) UpdateDraft(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);id,err:=parseID(chi.URLParam(r,"messageID"));if err!=nil{writeError(w,400,"invalid_message_id");return};var in draftRequest;if err=decode(w,r,&in,512<<10);err!=nil{writeError(w,400,"invalid_json");return};out,err:=h.Repo.UpdateDraft(r.Context(),a.User.ID,id,toDraft(in));if err!=nil{writeRepoError(w,err);return};writeJSON(w,200,out)}
 func (h Handler) SendDraft(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);id,err:=parseID(chi.URLParam(r,"messageID"));if err!=nil{writeError(w,400,"invalid_message_id");return};out,err:=h.Repo.SendDraft(r.Context(),a.User.ID,id,time.Now().UTC());if err!=nil{writeRepoError(w,err);return};writeJSON(w,200,out)}
