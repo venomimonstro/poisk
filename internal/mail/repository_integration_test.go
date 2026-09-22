@@ -31,6 +31,20 @@ func TestInvalidRecipientCannotPartiallySend(t *testing.T){
 	var messages,items int;if err=pool.QueryRow(ctx,`SELECT count(*) FROM mail_messages WHERE sender_mailbox_id=$1`,senderBox.ID).Scan(&messages);err!=nil{t.Fatal(err)};if err=pool.QueryRow(ctx,`SELECT count(*) FROM mail_items WHERE mailbox_id=$1`,validBox.ID).Scan(&items);err!=nil{t.Fatal(err)};if messages!=0||items!=0{t.Fatalf("partial state messages=%d recipient items=%d",messages,items)}
 }
 
+func TestRecipientDeactivationCancelsEntireSend(t *testing.T){
+	pool:=mailDB(t);repo:=Repository{DB:pool};ctx:=context.Background();sender:=mailUser(t,pool,"deactivate-sender");first:=mailUser(t,pool,"deactivate-first");second:=mailUser(t,pool,"deactivate-second")
+	senderBox,err:=repo.EnsureMailbox(ctx,sender);if err!=nil{t.Fatal(err)};firstBox,err:=repo.EnsureMailbox(ctx,first);if err!=nil{t.Fatal(err)};secondBox,err:=repo.EnsureMailbox(ctx,second);if err!=nil{t.Fatal(err)}
+	draft,err:=repo.CreateDraft(ctx,sender,DraftInput{Subject:"Recipient disabled before send",BodyText:"Delivery must be all or none if a recipient is disabled.",Recipients:[]Recipient{{Address:firstBox.Address,Type:"TO"},{Address:secondBox.Address,Type:"CC"}}});if err!=nil{t.Fatal(err)}
+	if _,err=pool.Exec(ctx,`UPDATE mailboxes SET status='DISABLED',updated_at=now() WHERE mailbox_id=$1`,secondBox.ID);err!=nil{t.Fatal(err)}
+	if _,err=repo.SendDraft(ctx,sender,draft.ID,time.Now().UTC());err!=ErrConflict{t.Fatalf("expected conflict, got %v",err)}
+	var state string;if err=pool.QueryRow(ctx,`SELECT state FROM mail_messages WHERE message_id=$1`,draft.ID).Scan(&state);err!=nil{t.Fatal(err)};if state!="DRAFT"{t.Fatalf("message state=%s",state)}
+	var senderDraft,firstDeliveries,secondDeliveries int
+	if err=pool.QueryRow(ctx,`SELECT count(*) FROM mail_items WHERE mailbox_id=$1 AND message_id=$2 AND item_role='DRAFT'`,senderBox.ID,draft.ID).Scan(&senderDraft);err!=nil{t.Fatal(err)}
+	if err=pool.QueryRow(ctx,`SELECT count(*) FROM mail_items WHERE mailbox_id=$1 AND message_id=$2 AND item_role='DELIVERY'`,firstBox.ID,draft.ID).Scan(&firstDeliveries);err!=nil{t.Fatal(err)}
+	if err=pool.QueryRow(ctx,`SELECT count(*) FROM mail_items WHERE mailbox_id=$1 AND message_id=$2 AND item_role='DELIVERY'`,secondBox.ID,draft.ID).Scan(&secondDeliveries);err!=nil{t.Fatal(err)}
+	if senderDraft!=1||firstDeliveries!=0||secondDeliveries!=0{t.Fatalf("draft=%d first=%d second=%d",senderDraft,firstDeliveries,secondDeliveries)}
+}
+
 func TestSelfSendCreatesSentAndInboxCopies(t *testing.T){
 	pool:=mailDB(t);repo:=Repository{DB:pool};ctx:=context.Background();user:=mailUser(t,pool,"self");box,err:=repo.EnsureMailbox(ctx,user);if err!=nil{t.Fatal(err)}
 	draft,err:=repo.CreateDraft(ctx,user,DraftInput{Subject:"Self delivery",BodyText:"Self delivery must create separate sent and inbox items.",Recipients:[]Recipient{{Address:box.Address,Type:"TO"},{Address:box.Address,Type:"CC"}}});if err!=nil{t.Fatal(err)}
