@@ -33,6 +33,8 @@ type InboundAttachment struct {
 
 type InboundMessage struct {
 	From string
+	ReplyTo string
+	InternetMessageID string
 	Subject string
 	BodyText string
 	Attachments []InboundAttachment
@@ -44,12 +46,14 @@ func ParseInboundMIME(raw []byte)(InboundMessage,error){
 	if len(raw)==0||len(raw)>MaxInboundRawBytes{return InboundMessage{},ErrInvalid}
 	msg,err:=stdmail.ReadMessage(bytes.NewReader(raw));if err!=nil{return InboundMessage{},ErrInvalid}
 	from,err:=singleMailboxAddress(msg.Header.Get("From"));if err!=nil{return InboundMessage{},ErrInvalid}
+	replyTo:="";if strings.TrimSpace(msg.Header.Get("Reply-To"))!=""{replyTo,err=singleMailboxAddress(msg.Header.Get("Reply-To"));if err!=nil{return InboundMessage{},ErrInvalid}}
+	internetID:=strings.TrimSpace(msg.Header.Get("Message-ID"));if len(internetID)>998||strings.ContainsAny(internetID,"\r\n\x00"){return InboundMessage{},ErrInvalid}
 	subject:=decodeHeader(msg.Header.Get("Subject"));subject=strings.TrimSpace(subject);if subject==""{subject="(без темы)"};if utf8.RuneCountInString(subject)>maxSubjectRunes{return InboundMessage{},ErrInvalid}
 	mediaType,params,err:=mime.ParseMediaType(msg.Header.Get("Content-Type"));if err!=nil&&msg.Header.Get("Content-Type")!=""{return InboundMessage{},ErrInvalid};if mediaType==""{mediaType="text/plain"}
 	var textParts []string;var attachments []InboundAttachment;budget:=&inboundBudget{}
 	if err:=parseInboundEntity(mediaType,params,msg.Header,msg.Body,budget,&textParts,&attachments,0);err!=nil{return InboundMessage{},err}
 	body:=strings.TrimSpace(strings.Join(textParts,"\n\n"));if body==""{body="[Письмо не содержит безопасной текстовой части]"};if utf8.RuneCountInString(body)>maxBodyRunes{body=string([]rune(body)[:maxBodyRunes])}
-	return InboundMessage{From:from,Subject:subject,BodyText:body,Attachments:attachments},nil
+	return InboundMessage{From:from,ReplyTo:replyTo,InternetMessageID:internetID,Subject:subject,BodyText:body,Attachments:attachments},nil
 }
 
 func parseInboundEntity(mediaType string,params map[string]string,header stdmail.Header,body io.Reader,b *inboundBudget,textParts *[]string,attachments *[]InboundAttachment,depth int)error{
@@ -70,23 +74,13 @@ func parseInboundEntity(mediaType string,params map[string]string,header stdmail
 	if mediaType=="text/plain"{
 		data,err:=io.ReadAll(io.LimitReader(decoded,2<<20));if err!=nil{return ErrInvalid};charset:=strings.ToLower(strings.TrimSpace(params["charset"]));if charset!=""&&charset!="utf-8"&&charset!="us-ascii"{return nil};text:=strings.TrimSpace(string(data));if text!=""{*textParts=append(*textParts,text)};return nil
 	}
-	// Active HTML and all other inline media are intentionally discarded.
 	return nil
 }
 
 func decodeTransfer(r io.Reader,enc string)io.Reader{switch strings.ToLower(strings.TrimSpace(enc)){case "","7bit","8bit","binary":return r;case "base64":return base64.NewDecoder(base64.StdEncoding,r);case "quoted-printable":return quotedprintable.NewReader(r);default:return nil}}
 
 func singleMailboxAddress(raw string)(string,error){list,err:=stdmail.ParseAddressList(raw);if err!=nil||len(list)!=1{return "",ErrInvalid};addr:=strings.TrimSpace(list[0].Address);if len(addr)<3||len(addr)>320||strings.ContainsAny(addr,"\r\n\x00"){return "",ErrInvalid};return addr,nil}
-
 func decodeHeader(raw string)string{if strings.TrimSpace(raw)==""{return ""};v,err:=new(mime.WordDecoder).DecodeHeader(raw);if err!=nil{return raw};return v}
-
-func dangerousAttachment(name,contentType string)bool{
-	ext:=strings.ToLower(filepath.Ext(name));switch ext{case ".exe",".com",".bat",".cmd",".ps1",".vbs",".vbe",".js",".jse",".wsf",".wsh",".scr",".msi",".msp",".jar",".hta",".html",".htm",".svg":return true}
-	ct:=strings.ToLower(strings.TrimSpace(contentType));return ct=="text/html"||ct=="image/svg+xml"||strings.Contains(ct,"javascript")||strings.Contains(ct,"x-msdownload")
-}
-
-func InboundRecipientAddress(raw string)(string,error){
-	raw=strings.ToLower(strings.TrimSpace(raw));if len(raw)<3||len(raw)>320||strings.ContainsAny(raw,"\r\n\x00"){return "",ErrInvalid};parsed,err:=stdmail.ParseAddress(raw);if err!=nil||strings.ToLower(parsed.Address)!=raw{return "",ErrInvalid};return raw,nil
-}
-
+func dangerousAttachment(name,contentType string)bool{ext:=strings.ToLower(filepath.Ext(name));switch ext{case ".exe",".com",".bat",".cmd",".ps1",".vbs",".vbe",".js",".jse",".wsf",".wsh",".scr",".msi",".msp",".jar",".hta",".html",".htm",".svg":return true};ct:=strings.ToLower(strings.TrimSpace(contentType));return ct=="text/html"||ct=="image/svg+xml"||strings.Contains(ct,"javascript")||strings.Contains(ct,"x-msdownload")}
+func InboundRecipientAddress(raw string)(string,error){raw=strings.ToLower(strings.TrimSpace(raw));if len(raw)<3||len(raw)>320||strings.ContainsAny(raw,"\r\n\x00"){return "",ErrInvalid};parsed,err:=stdmail.ParseAddress(raw);if err!=nil||strings.ToLower(parsed.Address)!=raw{return "",ErrInvalid};return raw,nil}
 func inboundDuplicateKey(eventID string)string{return fmt.Sprintf("inbound:%s",strings.TrimSpace(eventID))}
