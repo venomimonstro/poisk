@@ -38,6 +38,7 @@ func hashQuery(q string)[32]byte{return sha256.Sum256([]byte(q))}
 
 func (r *Repository) Record(ctx context.Context,s Snapshot,now time.Time)(Gap,error){
 	q:=strings.TrimSpace(s.Normalized);if r==nil||r.db==nil||q==""||len([]rune(q))>256{return Gap{},ErrInvalid}
+	if now.IsZero(){now=time.Now().UTC()};now=now.UTC()
 	if s.Total<0{s.Total=0};s.AverageQuality=clampFloat(s.AverageQuality,0,100);s.AverageFreshness=clampFloat(s.AverageFreshness,0,100);s.AverageSpam=clampFloat(s.AverageSpam,0,100)
 	hash:=hashQuery(q);bucket:=bucketStart(now);resultCap:=s.Total;if resultCap>100{resultCap=100}
 	zero:=0;if s.Total==0{zero=1};lowQ:=0;if s.AverageQuality<55{lowQ=1};lowF:=0;if s.AverageFreshness<50{lowF=1};highSpam:=0;if s.AverageSpam>60{highSpam=1}
@@ -54,14 +55,14 @@ ON CONFLICT(query_hash,bucket_start) DO UPDATE SET
  quality_sum=query_signal_buckets.quality_sum + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.quality_sum ELSE 0 END,
  freshness_sum=query_signal_buckets.freshness_sum + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.freshness_sum ELSE 0 END,
  spam_sum=query_signal_buckets.spam_sum + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.spam_sum ELSE 0 END,
- updated_at=now()`,hash[:],bucket,zero,lowQ,lowF,highSpam,resultCap,int(s.AverageQuality),int(s.AverageFreshness),int(s.AverageSpam));if err!=nil{return Gap{},err}
+ updated_at=$11`,hash[:],bucket,zero,lowQ,lowF,highSpam,resultCap,int(s.AverageQuality),int(s.AverageFreshness),int(s.AverageSpam),now);if err!=nil{return Gap{},err}
 
 	for _,host:=range normalizeHosts(s.Hosts){
 		_,err=tx.Exec(ctx,`INSERT INTO query_gap_domain_observations(query_hash,domain_id,first_seen_at,last_seen_at,seen_buckets)
-SELECT $1,d.domain_id,now(),now(),1 FROM domains d
+SELECT $1,d.domain_id,$3,$3,1 FROM domains d
 WHERE d.host=$2 AND d.status='ACTIVE' AND d.policy IN ('ALLOW','LIMITED')
 ON CONFLICT(query_hash,domain_id) DO UPDATE SET
- last_seen_at=now(),
+ last_seen_at=GREATEST(query_gap_domain_observations.last_seen_at,$3),
  seen_buckets=LEAST(144,query_gap_domain_observations.seen_buckets + CASE WHEN query_gap_domain_observations.last_seen_at < $3 THEN 1 ELSE 0 END)`,hash[:],host,bucket);if err!=nil{return Gap{},err}
 	}
 
@@ -71,19 +72,19 @@ ON CONFLICT(query_hash,domain_id) DO UPDATE SET
  COALESCE(sum(quality_sum)::float/NULLIF(sum(hits),0),0),
  COALESCE(sum(freshness_sum)::float/NULLIF(sum(hits),0),0),
  COALESCE(sum(spam_sum)::float/NULLIF(sum(hits),0),0)
-FROM query_signal_buckets WHERE query_hash=$1 AND bucket_start>=now()-interval '24 hours'`,hash[:]).Scan(&buckets,&hits,&avgResults,&avgQuality,&avgFresh,&avgSpam);if err!=nil{return Gap{},err}
+FROM query_signal_buckets WHERE query_hash=$1 AND bucket_start>=$2-interval '24 hours'`,hash[:],now).Scan(&buckets,&hits,&avgResults,&avgQuality,&avgFresh,&avgSpam);if err!=nil{return Gap{},err}
 	scores:=Score(Signals{IndependentBuckets:buckets,Hits:hits,AverageResults:avgResults,AverageQuality:avgQuality,AverageFreshness:avgFresh,AverageSpam:avgSpam})
 	qualified:=Qualifies(scores,buckets);state:="WATCH";var representative any=nil;if qualified{state="OPEN";representative=q}
 	var out Gap;var rep *string
 	err=tx.QueryRow(ctx,`INSERT INTO query_gaps(query_hash,representative_query,state,demand_score,coverage_score,quality_score,freshness_score,spam_score,gap_score,independent_buckets,qualified_at,last_seen_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CASE WHEN $3='OPEN' THEN now() ELSE NULL END,now())
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CASE WHEN $3='OPEN' THEN $11 ELSE NULL END,$11)
 ON CONFLICT(query_hash) DO UPDATE SET
  representative_query=CASE WHEN query_gaps.state='SUPPRESSED' THEN query_gaps.representative_query WHEN EXCLUDED.state='OPEN' THEN COALESCE(query_gaps.representative_query,EXCLUDED.representative_query) ELSE query_gaps.representative_query END,
  state=CASE WHEN query_gaps.state='SUPPRESSED' THEN 'SUPPRESSED' WHEN EXCLUDED.state='OPEN' THEN 'OPEN' WHEN query_gaps.state='OPEN' THEN 'RESOLVED' ELSE 'WATCH' END,
- demand_score=EXCLUDED.demand_score,coverage_score=EXCLUDED.coverage_score,quality_score=EXCLUDED.quality_score,freshness_score=EXCLUDED.freshness_score,spam_score=EXCLUDED.spam_score,gap_score=EXCLUDED.gap_score,independent_buckets=EXCLUDED.independent_buckets,last_seen_at=now(),
- qualified_at=CASE WHEN EXCLUDED.state='OPEN' THEN COALESCE(query_gaps.qualified_at,now()) ELSE query_gaps.qualified_at END,
- resolved_at=CASE WHEN query_gaps.state='OPEN' AND EXCLUDED.state<>'OPEN' THEN now() ELSE query_gaps.resolved_at END
-RETURNING gap_id,state,representative_query,demand_score,coverage_score,quality_score,freshness_score,spam_score,gap_score,independent_buckets`,hash[:],representative,state,scores.Demand,scores.Coverage,scores.Quality,scores.Freshness,scores.Spam,scores.Gap,buckets).Scan(&out.ID,&out.State,&rep,&out.Scores.Demand,&out.Scores.Coverage,&out.Scores.Quality,&out.Scores.Freshness,&out.Scores.Spam,&out.Scores.Gap,&out.IndependentBuckets);if err!=nil{return Gap{},err};if rep!=nil{out.RepresentativeQuery=*rep}
+ demand_score=EXCLUDED.demand_score,coverage_score=EXCLUDED.coverage_score,quality_score=EXCLUDED.quality_score,freshness_score=EXCLUDED.freshness_score,spam_score=EXCLUDED.spam_score,gap_score=EXCLUDED.gap_score,independent_buckets=EXCLUDED.independent_buckets,last_seen_at=$11,
+ qualified_at=CASE WHEN EXCLUDED.state='OPEN' THEN COALESCE(query_gaps.qualified_at,$11) ELSE query_gaps.qualified_at END,
+ resolved_at=CASE WHEN EXCLUDED.state='OPEN' THEN NULL WHEN query_gaps.state='OPEN' AND EXCLUDED.state<>'OPEN' THEN $11 ELSE query_gaps.resolved_at END
+RETURNING gap_id,state,representative_query,demand_score,coverage_score,quality_score,freshness_score,spam_score,gap_score,independent_buckets`,hash[:],representative,state,scores.Demand,scores.Coverage,scores.Quality,scores.Freshness,scores.Spam,scores.Gap,buckets,now).Scan(&out.ID,&out.State,&rep,&out.Scores.Demand,&out.Scores.Coverage,&out.Scores.Quality,&out.Scores.Freshness,&out.Scores.Spam,&out.Scores.Gap,&out.IndependentBuckets);if err!=nil{return Gap{},err};if rep!=nil{out.RepresentativeQuery=*rep}
 	if err=tx.Commit(ctx);err!=nil{return Gap{},err};return out,nil
 }
 
