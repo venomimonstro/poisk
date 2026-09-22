@@ -58,9 +58,16 @@ func (c *Client) EnsureSchema(ctx context.Context) error {
 	if err != nil { return fmt.Errorf("describe web index: %w", err) }
 	hasAuthority, err := rawHasColumn(body, "authority_score")
 	if err != nil { return err }
+	hasFetchedAt, err := rawHasColumn(body, "fetched_at")
+	if err != nil { return err }
 	if !hasAuthority {
 		if _, err := c.execSQL(ctx, "ALTER TABLE "+WebIndex+" ADD COLUMN authority_score FLOAT"); err != nil {
 			return fmt.Errorf("add authority_score attribute: %w", err)
+		}
+	}
+	if !hasFetchedAt {
+		if _, err := c.execSQL(ctx, "ALTER TABLE "+WebIndex+" ADD COLUMN fetched_at TIMESTAMP"); err != nil {
+			return fmt.Errorf("add fetched_at attribute: %w", err)
 		}
 	}
 	return nil
