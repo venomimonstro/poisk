@@ -44,6 +44,8 @@ func (h Handler) Routes()http.Handler{
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/answer/metrics",h.AnswerMetrics)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/organizations/imports",h.OrganizationImports)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/organizations/reviews",h.OrganizationReviews)
+		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/maps/state",h.MapState)
+		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/addresses/data",h.AddressData)
 		protected.With(h.RequireRoles("OPERATOR")).Get("/users/sessions",h.ConsumerSessions)
 		protected.With(h.RequireRoles("OPERATOR")).Get("/users/security-events",h.ConsumerSecurityEvents)
 		protected.With(h.RequireRoles("SUPERADMIN")).Get("/owner",h.OwnerDashboard)
