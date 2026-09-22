@@ -48,10 +48,12 @@ services:
       MAP_ARTIFACT_ROOT: /maps
       ORG_IMPORT_ROOT: /imports
       ADDRESS_IMPORT_ROOT: /address-imports
+      MAIL_BLOB_DIR: /mail-blobs
     volumes:
       - ./data/maps:/maps:ro
       - ./data/imports:/imports:ro
       - ./data/address-imports:/address-imports:ro
+      - mail_blob_data:/mail-blobs
     depends_on:
       postgres:
         condition: service_healthy
@@ -286,3 +288,4 @@ services:
 volumes:
   postgres_data:
   manticore_data:
+  mail_blob_data:
