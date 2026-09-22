@@ -38,19 +38,26 @@ func (r *Repository) EligibleDomains(ctx context.Context, limit int32) ([]Domain
 		return nil, errors.New("invalid scheduler domain limit")
 	}
 	const q = `
-SELECT domain_id, host, policy, crawl_budget, max_urls, max_depth,
-       requests_per_second, max_concurrency, max_bytes_per_day,
-       quality_score, demand_score, next_crawl_at
-FROM domains
-WHERE status = 'ACTIVE'
-  AND policy IN ('ALLOW','LIMITED')
-  AND crawl_budget > 0
-  AND max_urls > 0
-  AND (next_crawl_at IS NULL OR next_crawl_at <= now())
-ORDER BY demand_score DESC,
-         quality_score DESC,
-         COALESCE(next_crawl_at, '-infinity'::timestamptz) ASC,
-         domain_id ASC
+WITH active_feedback AS (
+    SELECT domain_id, LEAST(25, COALESCE(MAX(boost),0))::double precision AS demand_boost
+    FROM query_gap_domain_feedback
+    WHERE expires_at > now()
+    GROUP BY domain_id
+)
+SELECT d.domain_id, d.host, d.policy, d.crawl_budget, d.max_urls, d.max_depth,
+       d.requests_per_second, d.max_concurrency, d.max_bytes_per_day,
+       d.quality_score, d.demand_score + COALESCE(f.demand_boost,0), d.next_crawl_at
+FROM domains d
+LEFT JOIN active_feedback f ON f.domain_id=d.domain_id
+WHERE d.status = 'ACTIVE'
+  AND d.policy IN ('ALLOW','LIMITED')
+  AND d.crawl_budget > 0
+  AND d.max_urls > 0
+  AND (d.next_crawl_at IS NULL OR d.next_crawl_at <= now())
+ORDER BY (d.demand_score + COALESCE(f.demand_boost,0)) DESC,
+         d.quality_score DESC,
+         COALESCE(d.next_crawl_at, '-infinity'::timestamptz) ASC,
+         d.domain_id ASC
 LIMIT $1`
 
 	rows, err := r.db.Query(ctx, q, limit)
