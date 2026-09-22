@@ -38,7 +38,8 @@ func normalizeBody(v string,min,max int)(string,error){v=strings.TrimSpace(v);n:
 func (r Repository) Upsert(ctx context.Context,userID,placeID int64,rating int,body string)(Review,error){
 	if r.DB==nil||userID<=0||placeID<=0||rating<1||rating>5{return Review{},ErrInvalid};var err error;if body,err=normalizeBody(body,10,4000);err!=nil{return Review{},err}
 	tx,err:=r.DB.Begin(ctx);if err!=nil{return Review{},err};defer func(){_=tx.Rollback(ctx)}()
-	var orgStatus string;if err=tx.QueryRow(ctx,`SELECT status FROM organizations WHERE place_id=$1`,placeID).Scan(&orgStatus);errors.Is(err,pgx.ErrNoRows){return Review{},ErrNotFound}else if err!=nil{return Review{},err};if orgStatus!="ACTIVE"&&orgStatus!="REVIEW"{return Review{},ErrForbidden}
+	var orgStatus string;if err=tx.QueryRow(ctx,`SELECT status FROM organizations WHERE place_id=$1`,placeID).Scan(&orgStatus);errors.Is(err,pgx.ErrNoRows){return Review{},ErrNotFound}else if err!=nil{return Review{},err};if orgStatus!="ACTIVE"{return Review{},ErrForbidden}
+	var claimedByUser bool;if err=tx.QueryRow(ctx,`SELECT EXISTS(SELECT 1 FROM organization_claims c JOIN webmaster_users w ON w.user_id=c.user_id WHERE c.place_id=$1 AND c.status='ACTIVE' AND w.consumer_user_id=$2)`,placeID,userID).Scan(&claimedByUser);err!=nil{return Review{},err};if claimedByUser{return Review{},ErrForbidden}
 	var existingID int64;var existingStatus string
 	err=tx.QueryRow(ctx,`SELECT review_id,status FROM organization_reviews WHERE place_id=$1 AND consumer_user_id=$2 FOR UPDATE`,placeID,userID).Scan(&existingID,&existingStatus)
 	if errors.Is(err,pgx.ErrNoRows){
