@@ -1,11 +1,12 @@
 package capacity
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
-	"context"
 )
 
 func TestRunHTTPBenchmarkCountsRequestsAndErrors(t *testing.T){
@@ -17,6 +18,13 @@ func TestRunHTTPBenchmarkCountsRequestsAndErrors(t *testing.T){
 	if m.Requests<=0||m.SampledRequests<=0{t.Fatalf("metrics=%+v",m)}
 	if m.Errors<=0||m.ErrorRate<=0{t.Fatalf("expected errors: %+v",m)}
 	if m.QPS<=0{t.Fatalf("qps=%f",m.QPS)}
+}
+
+func TestRunHTTPBenchmarkCountsOversizedResponsesAsErrors(t *testing.T){
+	srv:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){_,_=w.Write([]byte(strings.Repeat("x",4096)))}));defer srv.Close()
+	m,err:=RunHTTPBenchmark(context.Background(),HTTPBenchmarkConfig{URLs:[]string{srv.URL},Duration:40*time.Millisecond,Concurrency:1,RequestTimeout:time.Second,MaxBodyBytes:32})
+	if err!=nil{t.Fatal(err)}
+	if m.Requests==0||m.Errors!=m.Requests{t.Fatalf("expected every oversized response to fail: %+v",m)}
 }
 
 func TestRunHTTPBenchmarkRejectsUnboundedInputs(t *testing.T){
