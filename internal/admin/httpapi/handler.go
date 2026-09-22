@@ -56,6 +56,8 @@ func (h Handler) Routes()http.Handler{
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/query-gaps/apply",h.QueryGapApply)
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/datahub/preview",h.DataHubPreview)
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/datahub/apply",h.DataHubApply)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/organizations/reviews/preview",h.OrganizationReviewPreview)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/organizations/reviews/apply",h.OrganizationReviewApply)
 	})
 	return r
 }
