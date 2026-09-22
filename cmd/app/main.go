@@ -21,6 +21,7 @@ import (
 	"github.com/venomimonstro/poisk/internal/billing"
 	crawlerfetcher "github.com/venomimonstro/poisk/internal/crawler/fetcher"
 	crawlersecurity "github.com/venomimonstro/poisk/internal/crawler/security"
+	"github.com/venomimonstro/poisk/internal/demand"
 	indexmanticore "github.com/venomimonstro/poisk/internal/indexer/manticore"
 	"github.com/venomimonstro/poisk/internal/indexer/outbox"
 	"github.com/venomimonstro/poisk/internal/indexer/source"
@@ -101,10 +102,11 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	checker := health.Checker{DB: pool, ManticoreHost: cfg.ManticoreHost, ManticoreSQLPort: cfg.ManticoreSQLPort}
 	webmasterRepo := webmaster.NewRepository(pool)
 	billingRepo := billing.NewRepository(pool)
+	demandRepo := demand.NewRepository(pool)
 	searchBackend, err := searchbackend.New(searchbackend.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
 	if err != nil { return fmt.Errorf("create search backend: %w", err) }
 	searchService := &searchsvc.Service{Backend: searchBackend, Cache: searchsvc.NewCache(512), BackendConcurrency: make(chan struct{}, cfg.BackendConcurrent)}
-	searchHandler := searchhttp.Handler{SearchService: searchService, Impressions: webmasterRepo}
+	searchHandler := searchhttp.Handler{SearchService: searchService, Impressions: webmasterRepo, Demand: demandRepo}
 	answerService := &answersvc.Service{Search: searchService, MinConfidence: answersvc.DefaultMinConfidence}
 	answerHandler := answerhttp.Handler{AnswerService: answerService, Citations: webmasterRepo}
 	trackingHandler := webmasterhttp.TrackingHandler{Recorder: webmasterRepo}
