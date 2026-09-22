@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
 import { PMTiles, Protocol } from "pmtiles";
+import ReviewPanel from "./review-panel";
+import MapSearchPanel, { type MapSearchResult } from "./search-panel";
 
 type MapConfig = {
   version: string;
@@ -19,19 +21,7 @@ type MapConfig = {
   attribution_html: string;
 };
 
-type GeoResult = {
-  id: number;
-  name: string;
-  address: string;
-  city_key?: string;
-  category_key?: string;
-  phone?: string;
-  website?: string;
-  latitude?: number;
-  longitude?: number;
-  quality_score: number;
-  source_count: number;
-};
+type GeoResult = MapSearchResult;
 
 type GeoCluster = {
   id: string;
@@ -58,6 +48,13 @@ export default function MapPage() {
   const [version, setVersion] = useState("");
   const [selected, setSelected] = useState<GeoResult | null>(null);
   const [geoMeta, setGeoMeta] = useState("");
+
+  function selectOrganization(item: GeoResult) {
+    setSelected(item);
+    if (item.longitude !== undefined && item.latitude !== undefined && mapRef.current) {
+      mapRef.current.easeTo({ center: [item.longitude, item.latitude], zoom: Math.max(mapRef.current.getZoom(), 15) });
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -101,7 +98,10 @@ export default function MapPage() {
               return;
             }
             const placeID = cluster.place_ids?.[0];
-            if (placeID) setSelected(resultsRef.current.get(placeID) || null);
+            if (placeID) {
+              const item = resultsRef.current.get(placeID);
+              if (item) selectOrganization(item);
+            }
           });
           return new maplibregl.Marker({ element: button, anchor: "center" })
             .setLngLat([cluster.longitude, cluster.latitude])
@@ -200,8 +200,9 @@ export default function MapPage() {
         </div>
       </header>
       <div className="mapViewport" ref={containerRef} aria-label="Интерактивная карта" />
+      <MapSearchPanel onSelect={selectOrganization} />
       {selected && (
-        <aside className="geoCard" aria-label="Организация">
+        <aside className="geoCard" aria-label="Организация" style={{ maxHeight: "calc(100vh - 100px)", overflowY: "auto" }}>
           <button className="geoCardClose" type="button" onClick={() => setSelected(null)} aria-label="Закрыть">×</button>
           <div className="geoCardCategory">{selected.category_key || "Организация"}</div>
           <strong className="geoCardTitle">{selected.name}</strong>
@@ -211,6 +212,7 @@ export default function MapPage() {
             {selected.website && <a href={selected.website} rel="noopener noreferrer">Сайт</a>}
             {selected.phone && <a href={`tel:${selected.phone}`}>Позвонить</a>}
           </div>
+          <ReviewPanel placeID={selected.id} />
         </aside>
       )}
       {status && <div className="mapStatus" role="status">{status}</div>}
