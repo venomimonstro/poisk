@@ -7,8 +7,13 @@ import (
 	"time"
 )
 
+type CycleGate interface {
+	Allow(context.Context) (bool, error)
+}
+
 type Worker struct {
 	Repo          *Repository
+	Gate          CycleGate
 	BatchSize     int
 	TrendLimit    int
 	PollInterval  time.Duration
@@ -26,9 +31,21 @@ func (w Worker) Run(ctx context.Context) error {
 
 	for {
 		if err := ctx.Err(); err != nil { return err }
+		if w.Gate != nil {
+			allowed, err := w.Gate.Allow(ctx)
+			if err != nil {
+				slog.Warn("data hub resource gate failed", "error", err)
+				if err := sleepContext(ctx, w.ErrorBackoff); err != nil { return err }
+				continue
+			}
+			if !allowed {
+				if err := sleepContext(ctx, w.PollInterval); err != nil { return err }
+				continue
+			}
+		}
+
 		now := time.Now().UTC()
 		progress := false
-
 		for _, job := range []struct {
 			name string
 			run  func(context.Context, int, time.Time) (BatchStats, error)
@@ -50,7 +67,6 @@ func (w Worker) Run(ctx context.Context) error {
 		if _, err := w.Repo.MaterializeTrends(ctx, now, w.TrendLimit); err != nil {
 			slog.Error("data hub trends materialization failed", "error", err)
 		}
-
 		wait := w.PollInterval
 		if progress { wait = 100 * time.Millisecond }
 		if err := sleepContext(ctx, wait); err != nil { return err }
