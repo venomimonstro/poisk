@@ -81,6 +81,8 @@ func run() error {
 		return runDemandWorker(pool)
 	case "datahub-worker":
 		return runDataHubWorker(pool)
+	case "mail-gateway-worker":
+		return runMailGatewayWorker(pool)
 	case "demandctl":
 		return runDemandCtl(ctx, pool, os.Args[2:])
 	case "datahubctl":
