@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"golang.org/x/crypto/argon2"
 )
 
 const (
@@ -34,6 +36,10 @@ func HashPassword(password string) (string, error) {
 }
 
 func VerifyPassword(encoded, password string) (bool, error) {
+	encoded = strings.TrimSpace(encoded)
+	if strings.HasPrefix(encoded, "$argon2id$") {
+		return verifyArgon2ID(encoded, password)
+	}
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 4 || parts[0] != passwordScheme { return false, ErrInvalidHash }
 	iterations, err := strconv.Atoi(parts[1])
@@ -43,6 +49,21 @@ func VerifyPassword(encoded, password string) (bool, error) {
 	want, err := base64.RawURLEncoding.DecodeString(parts[3])
 	if err != nil || len(want) != passwordKeyBytes { return false, ErrInvalidHash }
 	got := pbkdf2SHA256([]byte(password), salt, iterations, len(want))
+	return subtle.ConstantTimeCompare(got, want) == 1, nil
+}
+
+func verifyArgon2ID(encoded, password string) (bool, error) {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" { return false, ErrInvalidHash }
+	var memory, timeCost uint32
+	var threads uint8
+	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &timeCost, &threads); err != nil { return false, ErrInvalidHash }
+	if memory < 16*1024 || memory > 1024*1024 || timeCost < 1 || timeCost > 10 || threads < 1 || threads > 16 { return false, ErrInvalidHash }
+	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
+	if err != nil || len(salt) < 16 || len(salt) > 64 { return false, ErrInvalidHash }
+	want, err := base64.RawStdEncoding.DecodeString(parts[5])
+	if err != nil || len(want) < 16 || len(want) > 64 { return false, ErrInvalidHash }
+	got := argon2.IDKey([]byte(password), salt, timeCost, memory, threads, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
