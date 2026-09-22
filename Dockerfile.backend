@@ -10,6 +10,7 @@ WORKDIR /app
 COPY --from=build /out/poisk /app/poisk
 COPY db/migrations /app/db/migrations
 COPY docs/quality /app/docs/quality
+COPY deploy/capacity /app/deploy/capacity
 USER nonroot:nonroot
 EXPOSE 8080
 ENTRYPOINT ["/app/poisk"]
