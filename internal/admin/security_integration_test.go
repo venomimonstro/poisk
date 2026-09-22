@@ -49,3 +49,21 @@ func TestDomainPreviewIsSingleUseAndSessionBound(t *testing.T){
 	var status,policy string;if err:=pool.QueryRow(ctx,`SELECT status,policy FROM domains WHERE domain_id=$1`,domainID).Scan(&status,&policy);err!=nil{t.Fatal(err)}
 	if status!="PAUSED"||policy!="LIMITED"{t.Fatalf("domain status=%s policy=%s",status,policy)}
 }
+
+func TestQueryGapPreviewIsSingleUseAndAudited(t *testing.T){
+	pool:=adminIntegrationDB(t);repo,_,session,_:=createIntegrationAdmin(t,pool,"gap");ctx:=context.Background();service:=Service{Store:repo}
+	queryHash:=bytes.Repeat([]byte{byte(time.Now().UnixNano()%200+20)},32)
+	var gapID int64
+	if err:=pool.QueryRow(ctx,`INSERT INTO query_gaps(query_hash,representative_query,state,demand_score,coverage_score,quality_score,freshness_score,spam_score,gap_score,independent_buckets) VALUES($1,'integration query','OPEN',80,20,30,40,5,60,5) RETURNING gap_id`,queryHash).Scan(&gapID);err!=nil{t.Fatal(err)}
+	t.Cleanup(func(){_,_=pool.Exec(context.Background(),`DELETE FROM query_gaps WHERE gap_id=$1`,gapID)})
+	preview,err:=service.PreviewQueryGapMutation(ctx,session,gapID,"SUPPRESS","integration moderation");if err!=nil{t.Fatal(err)}
+	if preview.Before.State!="OPEN"||preview.After.State!="SUPPRESSED"{t.Fatalf("preview=%+v",preview)}
+	result,err:=service.ApplyQueryGapMutation(ctx,session,preview.Token);if err!=nil{t.Fatal(err)}
+	if result.State!="SUPPRESSED"{t.Fatalf("result=%+v",result)}
+	if _,err:=service.ApplyQueryGapMutation(ctx,session,preview.Token);!errors.Is(err,ErrPreviewInvalid){t.Fatalf("preview reused: %v",err)}
+	var state string;var auditCount,eventCount int
+	if err:=pool.QueryRow(ctx,`SELECT state FROM query_gaps WHERE gap_id=$1`,gapID).Scan(&state);err!=nil{t.Fatal(err)}
+	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM audit_log WHERE actor_type='ADMIN' AND action='QUERY_GAP_STATE_APPLY' AND entity_type='QUERY_GAP' AND entity_id=$1::bigint::text`,gapID).Scan(&auditCount);err!=nil{t.Fatal(err)}
+	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM query_gap_feedback_events WHERE gap_id=$1 AND action='SUPPRESS'`,gapID).Scan(&eventCount);err!=nil{t.Fatal(err)}
+	if state!="SUPPRESSED"||auditCount!=1||eventCount!=1{t.Fatalf("state=%s audit=%d events=%d",state,auditCount,eventCount)}
+}
