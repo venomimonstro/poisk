@@ -38,15 +38,19 @@ func normalizeBody(v string,min,max int)(string,error){v=strings.TrimSpace(v);n:
 func (r Repository) Upsert(ctx context.Context,userID,placeID int64,rating int,body string)(Review,error){
 	if r.DB==nil||userID<=0||placeID<=0||rating<1||rating>5{return Review{},ErrInvalid};var err error;if body,err=normalizeBody(body,10,4000);err!=nil{return Review{},err}
 	tx,err:=r.DB.Begin(ctx);if err!=nil{return Review{},err};defer func(){_=tx.Rollback(ctx)}()
+	var trustedAccount bool
+	if err=tx.QueryRow(ctx,`SELECT email_verified_at IS NOT NULL OR created_at <= now()-interval '7 days' FROM consumer_users WHERE user_id=$1 AND status='ACTIVE'`,userID).Scan(&trustedAccount);errors.Is(err,pgx.ErrNoRows){return Review{},ErrForbidden}else if err!=nil{return Review{},err}
 	var orgStatus string;if err=tx.QueryRow(ctx,`SELECT status FROM organizations WHERE place_id=$1`,placeID).Scan(&orgStatus);errors.Is(err,pgx.ErrNoRows){return Review{},ErrNotFound}else if err!=nil{return Review{},err};if orgStatus!="ACTIVE"{return Review{},ErrForbidden}
 	var claimedByUser bool;if err=tx.QueryRow(ctx,`SELECT EXISTS(SELECT 1 FROM organization_claims c JOIN webmaster_users w ON w.user_id=c.user_id WHERE c.place_id=$1 AND c.status='ACTIVE' AND w.consumer_user_id=$2)`,placeID,userID).Scan(&claimedByUser);err!=nil{return Review{},err};if claimedByUser{return Review{},ErrForbidden}
 	var existingID int64;var existingStatus string
 	err=tx.QueryRow(ctx,`SELECT review_id,status FROM organization_reviews WHERE place_id=$1 AND consumer_user_id=$2 FOR UPDATE`,placeID,userID).Scan(&existingID,&existingStatus)
 	if errors.Is(err,pgx.ErrNoRows){
-		var out Review;err=tx.QueryRow(ctx,`INSERT INTO organization_reviews(place_id,consumer_user_id,rating,body,status,change_actor_type,change_actor_id,change_reason) VALUES($1,$2,$3,$4,'VISIBLE','USER',$2,'USER_CREATE') RETURNING review_id,place_id,rating,body,status,version,created_at,updated_at`,placeID,userID,rating,body).Scan(&out.ID,&out.PlaceID,&out.Rating,&out.Body,&out.Status,&out.Version,&out.CreatedAt,&out.UpdatedAt);if err!=nil{return Review{},err};if err=tx.Commit(ctx);err!=nil{return Review{},err};return out,nil
+		status:="VISIBLE";reason:="USER_CREATE";if !trustedAccount{status="PENDING";reason="USER_CREATE_TRUST_REVIEW"}
+		var out Review;err=tx.QueryRow(ctx,`INSERT INTO organization_reviews(place_id,consumer_user_id,rating,body,status,change_actor_type,change_actor_id,change_reason) VALUES($1,$2,$3,$4,$5,'USER',$2,$6) RETURNING review_id,place_id,rating,body,status,version,created_at,updated_at`,placeID,userID,rating,body,status,reason).Scan(&out.ID,&out.PlaceID,&out.Rating,&out.Body,&out.Status,&out.Version,&out.CreatedAt,&out.UpdatedAt);if err!=nil{return Review{},err};if err=tx.Commit(ctx);err!=nil{return Review{},err};return out,nil
 	}
 	if err!=nil{return Review{},err}
-	newStatus:=existingStatus;reason:="USER_EDIT";switch existingStatus{case "HIDDEN","REJECTED":newStatus="PENDING";reason="USER_EDIT_AFTER_MODERATION";case "DELETED":newStatus="VISIBLE";reason="USER_RESTORE"}
+	newStatus:=existingStatus;reason:="USER_EDIT"
+	if !trustedAccount{newStatus="PENDING";reason="USER_EDIT_TRUST_REVIEW"}else{switch existingStatus{case "HIDDEN","REJECTED":newStatus="PENDING";reason="USER_EDIT_AFTER_MODERATION";case "DELETED":newStatus="VISIBLE";reason="USER_RESTORE"}}
 	var out Review;err=tx.QueryRow(ctx,`UPDATE organization_reviews SET rating=$3,body=$4,status=$5,change_actor_type='USER',change_actor_id=$2,change_reason=$6 WHERE review_id=$1 AND consumer_user_id=$2 RETURNING review_id,place_id,rating,body,status,version,created_at,updated_at`,existingID,userID,rating,body,newStatus,reason).Scan(&out.ID,&out.PlaceID,&out.Rating,&out.Body,&out.Status,&out.Version,&out.CreatedAt,&out.UpdatedAt);if err!=nil{return Review{},err};if err=tx.Commit(ctx);err!=nil{return Review{},err};return out,nil
 }
 
