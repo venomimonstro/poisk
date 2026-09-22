@@ -37,9 +37,10 @@ func RunHTTPBenchmark(ctx context.Context,cfg HTTPBenchmarkConfig)(WorkloadMetri
 			if err!=nil&&benchCtx.Err()!=nil{return}
 			failed:=err!=nil
 			if err==nil{
-				_,readErr:=io.Copy(io.Discard,io.LimitReader(resp.Body,cfg.MaxBodyBytes+1));_ = resp.Body.Close()
+				if resp.ContentLength>cfg.MaxBodyBytes&&resp.ContentLength>=0{failed=true}
+				n,readErr:=io.Copy(io.Discard,io.LimitReader(resp.Body,cfg.MaxBodyBytes+1));_ = resp.Body.Close()
 				if readErr!=nil&&benchCtx.Err()!=nil{return}
-				if readErr!=nil||resp.StatusCode<200||resp.StatusCode>=300{failed=true}
+				if readErr!=nil||n>cfg.MaxBodyBytes||resp.StatusCode<200||resp.StatusCode>=300{failed=true}
 			}
 			requests.Add(1);if failed{errorsCount.Add(1)}
 			mu.Lock();if len(samples)<maxLatencySamples{samples=append(samples,latency)};mu.Unlock()
