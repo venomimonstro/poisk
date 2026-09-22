@@ -67,3 +67,24 @@ func TestQueryGapPreviewIsSingleUseAndAudited(t *testing.T){
 	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM query_gap_feedback_events WHERE gap_id=$1 AND action='SUPPRESS'`,gapID).Scan(&eventCount);err!=nil{t.Fatal(err)}
 	if state!="SUPPRESSED"||auditCount!=1||eventCount!=1{t.Fatalf("state=%s audit=%d events=%d",state,auditCount,eventCount)}
 }
+
+func TestOrganizationReviewPreviewApplyIsSingleUseAndAudited(t *testing.T){
+	pool:=adminIntegrationDB(t);repo,adminUser,session,_:=createIntegrationAdmin(t,pool,"org-review");ctx:=context.Background();service:=Service{Store:repo}
+	source:=fmt.Sprintf("admin-test-%d",time.Now().UnixNano());if _,err:=pool.Exec(ctx,`INSERT INTO organization_sources(source_key,display_name) VALUES($1,'Admin integration')`,source);err!=nil{t.Fatal(err)}
+	var batchID int64;if err:=pool.QueryRow(ctx,`INSERT INTO organization_import_batches(source_key,external_batch_key,mode,status) VALUES($1,$2,'DRY_RUN','PLANNED') RETURNING batch_id`,source,"batch-1").Scan(&batchID);err!=nil{t.Fatal(err)}
+	var stagingID int64;if err:=pool.QueryRow(ctx,`INSERT INTO organization_staging_rows(batch_id,source_key,source_record_id,source_row_number,raw_payload,raw_bytes,normalized_name,normalized_address,state,payload_hash) VALUES($1,$2,'record-1',1,'{}',2,'incoming org','test street','PLANNED',$3) RETURNING staging_id`,batchID,source,fmt.Sprintf("%064x",time.Now().UnixNano())).Scan(&stagingID);err!=nil{t.Fatal(err)}
+	var placeID int64;if err:=pool.QueryRow(ctx,`INSERT INTO organizations(name,normalized_name,address,normalized_address,quality_score,source_count) VALUES('Candidate Org','candidate org','Test street','test street',80,1) RETURNING place_id`).Scan(&placeID);err!=nil{t.Fatal(err)}
+	planHash:=fmt.Sprintf("%064x",time.Now().UnixNano()+1);if _,err:=pool.Exec(ctx,`INSERT INTO organization_import_plans(batch_id,staging_id,action,target_place_id,match_rule,confidence,reason_code,plan_hash) VALUES($1,$2,'REVIEW',NULL,'AMBIGUOUS',70,'AMBIGUOUS_MATCH',$3)`,batchID,stagingID,planHash);err!=nil{t.Fatal(err)}
+	var reviewID int64;if err:=pool.QueryRow(ctx,`INSERT INTO organization_merge_review(batch_id,staging_id,candidate_place_id,reason_code,score) VALUES($1,$2,$3,'AMBIGUOUS_MATCH',70) RETURNING review_id`,batchID,stagingID,placeID).Scan(&reviewID);err!=nil{t.Fatal(err)}
+	t.Cleanup(func(){_,_=pool.Exec(context.Background(),`DELETE FROM organization_sources WHERE source_key=$1`,source);_,_=pool.Exec(context.Background(),`DELETE FROM organizations WHERE place_id=$1`,placeID)})
+	preview,err:=service.PreviewOrganizationReview(ctx,session,reviewID,"MERGE","verified candidate");if err!=nil{t.Fatal(err)}
+	otherHash:=bytes.Repeat([]byte{77},32);otherCSRF:=bytes.Repeat([]byte{76},32);other,err:=repo.CreateSession(ctx,adminUser.ID,otherHash,otherCSRF,nil,time.Hour);if err!=nil{t.Fatal(err)};other.Role="OPERATOR"
+	if _,err:=service.ApplyOrganizationReview(ctx,other,preview.Token);!errors.Is(err,ErrPreviewInvalid){t.Fatalf("foreign session used org preview: %v",err)}
+	result,err:=service.ApplyOrganizationReview(ctx,session,preview.Token);if err!=nil{t.Fatal(err)};if result.Status!="MERGED"{t.Fatalf("result=%+v",result)}
+	if _,err:=service.ApplyOrganizationReview(ctx,session,preview.Token);!errors.Is(err,ErrPreviewInvalid){t.Fatalf("org preview reused: %v",err)}
+	var action string;var target *int64;var eventCount,auditCount int
+	if err:=pool.QueryRow(ctx,`SELECT action,target_place_id FROM organization_import_plans WHERE staging_id=$1`,stagingID).Scan(&action,&target);err!=nil{t.Fatal(err)}
+	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM organization_import_events WHERE batch_id=$1 AND staging_id=$2 AND action='REVIEW_DECISION'`,batchID,stagingID).Scan(&eventCount);err!=nil{t.Fatal(err)}
+	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM audit_log WHERE actor_type='ADMIN' AND action='ORG_REVIEW_APPLY' AND entity_type='ORG_REVIEW' AND entity_id=$1::bigint::text`,reviewID).Scan(&auditCount);err!=nil{t.Fatal(err)}
+	if action!="UPDATE"||target==nil||*target!=placeID||eventCount!=1||auditCount!=1{t.Fatalf("action=%s target=%v events=%d audit=%d",action,target,eventCount,auditCount)}
+}
