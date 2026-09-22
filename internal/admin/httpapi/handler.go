@@ -38,6 +38,7 @@ func (h Handler) Routes()http.Handler{
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/users",h.ConsumerUsers)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/webmaster/sites",h.WebmasterSites)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER")).Get("/billing/invoices",h.BillingInvoices)
+		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/datahub/pages",h.DataHubPages)
 		protected.With(h.RequireRoles("OPERATOR")).Get("/users/sessions",h.ConsumerSessions)
 		protected.With(h.RequireRoles("OPERATOR")).Get("/users/security-events",h.ConsumerSecurityEvents)
 		protected.With(h.RequireRoles("SUPERADMIN")).Get("/owner",h.OwnerDashboard)
@@ -46,6 +47,8 @@ func (h Handler) Routes()http.Handler{
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/domains/apply",h.DomainApply)
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/query-gaps/preview",h.QueryGapPreview)
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/query-gaps/apply",h.QueryGapApply)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/datahub/preview",h.DataHubPreview)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/datahub/apply",h.DataHubApply)
 	})
 	return r
 }
