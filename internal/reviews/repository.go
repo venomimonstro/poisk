@@ -35,6 +35,16 @@ type Stats struct{Count int64 `json:"review_count"`;Average float64 `json:"avera
 
 func normalizeBody(v string,min,max int)(string,error){v=strings.TrimSpace(v);n:=len([]rune(v));if n<min||n>max||strings.ContainsRune(v,'\x00'){return "",ErrInvalid};return v,nil}
 
+func (r Repository) ensurePublicPlace(ctx context.Context,placeID int64)error{
+	if r.DB==nil||placeID<=0{return ErrInvalid}
+	var status string
+	err:=r.DB.QueryRow(ctx,`SELECT status FROM organizations WHERE place_id=$1`,placeID).Scan(&status)
+	if errors.Is(err,pgx.ErrNoRows){return ErrNotFound}
+	if err!=nil{return err}
+	if status!="ACTIVE"{return ErrNotFound}
+	return nil
+}
+
 func (r Repository) Upsert(ctx context.Context,userID,placeID int64,rating int,body string)(Review,error){
 	if r.DB==nil||userID<=0||placeID<=0||rating<1||rating>5{return Review{},ErrInvalid};var err error;if body,err=normalizeBody(body,10,4000);err!=nil{return Review{},err}
 	tx,err:=r.DB.Begin(ctx);if err!=nil{return Review{},err};defer func(){_=tx.Rollback(ctx)}()
@@ -71,10 +81,17 @@ func (r Repository) Reply(ctx context.Context,consumerUserID,reviewID int64,body
 	var out Reply;err=tx.QueryRow(ctx,`INSERT INTO organization_review_replies(review_id,claim_id,owner_consumer_user_id,body,status) VALUES($1,$2,$3,$4,'VISIBLE') ON CONFLICT(review_id) DO UPDATE SET claim_id=EXCLUDED.claim_id,owner_consumer_user_id=EXCLUDED.owner_consumer_user_id,body=EXCLUDED.body,status='VISIBLE',version=organization_review_replies.version+1,updated_at=now() RETURNING reply_id,body,version,updated_at`,reviewID,claimID,consumerUserID,body).Scan(&out.ID,&out.Body,&out.Version,&out.UpdatedAt);if err!=nil{return Reply{},err};if err=tx.Commit(ctx);err!=nil{return Reply{},err};return out,nil
 }
 
-func (r Repository) Stats(ctx context.Context,placeID int64)(Stats,error){if r.DB==nil||placeID<=0{return Stats{},ErrInvalid};var out Stats;err:=r.DB.QueryRow(ctx,`SELECT review_count,average_rating::float8 FROM organization_review_stats WHERE place_id=$1`,placeID).Scan(&out.Count,&out.Average);if errors.Is(err,pgx.ErrNoRows){return Stats{},nil};return out,err}
+func (r Repository) Stats(ctx context.Context,placeID int64)(Stats,error){
+	if err:=r.ensurePublicPlace(ctx,placeID);err!=nil{return Stats{},err}
+	var out Stats
+	err:=r.DB.QueryRow(ctx,`SELECT review_count,average_rating::float8 FROM organization_review_stats WHERE place_id=$1`,placeID).Scan(&out.Count,&out.Average)
+	if errors.Is(err,pgx.ErrNoRows){return Stats{},nil}
+	return out,err
+}
 
 func (r Repository) ListPublic(ctx context.Context,placeID int64,limit int,beforeID int64)([]Review,error){
 	if r.DB==nil||placeID<=0{return nil,ErrInvalid};if limit<=0{limit=20};if limit>100{limit=100};if beforeID<0{return nil,ErrInvalid}
+	if err:=r.ensurePublicPlace(ctx,placeID);err!=nil{return nil,err}
 	rows,err:=r.DB.Query(ctx,`SELECT r.review_id,r.place_id,r.rating,r.body,r.version,r.created_at,r.updated_at,rep.reply_id,rep.body,rep.version,rep.updated_at FROM organization_reviews r LEFT JOIN organization_review_replies rep ON rep.review_id=r.review_id AND rep.status='VISIBLE' WHERE r.place_id=$1 AND r.status='VISIBLE' AND ($2=0 OR r.review_id<$2) ORDER BY r.review_id DESC LIMIT $3`,placeID,beforeID,limit);if err!=nil{return nil,err};defer rows.Close();out:=make([]Review,0,limit)
 	for rows.Next(){var item Review;var replyID *int64;var replyBody *string;var replyVersion *int64;var replyUpdated *time.Time;if err:=rows.Scan(&item.ID,&item.PlaceID,&item.Rating,&item.Body,&item.Version,&item.CreatedAt,&item.UpdatedAt,&replyID,&replyBody,&replyVersion,&replyUpdated);err!=nil{return nil,err};if replyID!=nil&&replyBody!=nil&&replyVersion!=nil&&replyUpdated!=nil{item.OwnerReply=&Reply{ID:*replyID,Body:*replyBody,Version:*replyVersion,UpdatedAt:*replyUpdated}};out=append(out,item)};return out,rows.Err()
 }
