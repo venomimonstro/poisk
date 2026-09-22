@@ -152,6 +152,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	router.With(apiGuard.Protect).Get("/api/map/config", mapHandler.Config)
 	router.With(apiGuard.Protect).Post("/api/click", trackingHandler.Click)
 	registerAccountRoutes(router,apiGuard,cfg,pool)
+	registerWebmasterPortalRoutes(router,apiGuard,pool,webmasterService,billingRepo)
 	router.Mount("/api/webmaster", apiGuard.Protect(webmasterHandler.Routes()))
 	if err:=registerGeoRoute(router,apiGuard,cfg);err!=nil{return err}
 	if err:=registerAddressRoutes(router,apiGuard,cfg,pool);err!=nil{return err}
