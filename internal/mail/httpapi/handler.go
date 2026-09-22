@@ -3,13 +3,11 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -54,8 +52,5 @@ func (h Handler) Trash(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);i
 func (h Handler) Restore(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);id,err:=parseID(chi.URLParam(r,"itemID"));if err!=nil{writeError(w,400,"invalid_item_id");return};if err=h.Repo.Restore(r.Context(),a.User.ID,id);err!=nil{writeRepoError(w,err);return};w.WriteHeader(204)}
 func (h Handler) Spam(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);id,err:=parseID(chi.URLParam(r,"itemID"));if err!=nil{writeError(w,400,"invalid_item_id");return};var in boolRequest;if err=decode(w,r,&in,4<<10);err!=nil{writeError(w,400,"invalid_json");return};if err=h.Repo.MoveSpam(r.Context(),a.User.ID,id,in.Value);err!=nil{writeRepoError(w,err);return};w.WriteHeader(204)}
 
-func (h Handler) UploadAttachment(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);messageID,err:=parseID(chi.URLParam(r,"messageID"));if err!=nil{writeError(w,400,"invalid_message_id");return};r.Body=http.MaxBytesReader(w,r.Body,(25<<20)+(1<<20));reader,err:=r.MultipartReader();if err!=nil{writeError(w,400,"invalid_multipart");return};part,err:=reader.NextPart();if err!=nil{writeError(w,400,"file_required");return};defer part.Close();if part.FormName()!="file"||part.FileName()==""{writeError(w,400,"file_required");return};out,err:=h.Store.Upload(r.Context(),a.User.ID,messageID,part.FileName(),part.Header.Get("Content-Type"),part,time.Now().UTC());if err!=nil{writeRepoError(w,err);return};if next,e:=reader.NextPart();e==nil&&next!=nil{_ = next.Close();writeError(w,400,"single_file_only");return};writeJSON(w,201,out)}
+func (h Handler) UploadAttachment(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);messageID,err:=parseID(chi.URLParam(r,"messageID"));if err!=nil{writeError(w,400,"invalid_message_id");return};r.Body=http.MaxBytesReader(w,r.Body,(25<<20)+(1<<20));reader,err:=r.MultipartReader();if err!=nil{writeError(w,400,"invalid_multipart");return};part,err:=reader.NextPart();if err!=nil{writeError(w,400,"file_required");return};defer part.Close();if part.FormName()!="file"||part.FileName()==""{writeError(w,400,"file_required");return};out,err:=h.Store.Upload(r.Context(),a.User.ID,messageID,part.FileName(),part.Header.Get("Content-Type"),part,time.Now().UTC());if err!=nil{writeRepoError(w,err);return};writeJSON(w,201,out)}
 func (h Handler) DownloadAttachment(w http.ResponseWriter,r *http.Request){a,_:=authFrom(r);id,err:=parseID(chi.URLParam(r,"attachmentID"));if err!=nil{writeError(w,400,"invalid_attachment_id");return};file,err:=h.Store.ResolveDownload(r.Context(),a.User.ID,id);if err!=nil{writeRepoError(w,err);return};f,err:=os.Open(file.Path);if err!=nil{writeError(w,404,"not_found");return};defer f.Close();w.Header().Set("Content-Type","application/octet-stream");w.Header().Set("X-Content-Type-Options","nosniff");w.Header().Set("Content-Security-Policy","sandbox");w.Header().Set("Cache-Control","private, no-store");w.Header().Set("Content-Disposition",mime.FormatMediaType("attachment",map[string]string{"filename":file.Attachment.Filename}));w.Header().Set("Content-Length",strconv.FormatInt(file.Attachment.ByteSize,10));w.WriteHeader(200);_,_=io.Copy(w,f)}
-
-var _=fmt.Sprintf
-var _=strings.TrimSpace
