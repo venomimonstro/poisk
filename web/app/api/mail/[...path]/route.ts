@@ -17,6 +17,8 @@ function allowed(path:string[],method:string){
   if(path.length===3&&path[0]==="drafts"&&/^\d+$/.test(path[1])&&path[2]==="attachments")return method==="POST";
   if(path.length===4&&path[0]==="drafts"&&/^\d+$/.test(path[1])&&path[2]==="attachments"&&/^\d+$/.test(path[3]))return method==="DELETE";
   if(path.length===3&&path[0]==="items"&&/^\d+$/.test(path[1])&&itemActions.has(path[2]))return method==="POST";
+  if(path.length===2&&path[0]==="internet"&&path[1]==="address")return method==="GET"||method==="PUT";
+  if(path.length===4&&path[0]==="internet"&&path[1]==="messages"&&/^\d+$/.test(path[2])&&path[3]==="deliveries")return method==="GET";
   return false;
 }
 
