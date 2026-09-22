@@ -193,6 +193,23 @@ services:
     mem_limit: 128m
     cpus: 0.25
 
+  datahub-worker:
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["datahub-worker"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 192m
+    cpus: 0.30
+
   frontend:
     image: ${FRONTEND_IMAGE:-poisk/frontend:local}
     build:
