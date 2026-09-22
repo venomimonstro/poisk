@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const maxAttachmentBytes int64 = 25 << 20
@@ -69,13 +71,24 @@ func (s AttachmentStore) Upload(ctx context.Context,userID,messageID int64,filen
 	committed=true;out.ByteSize=n;out.ContentType=contentType;out.SHA256=digest;return out,nil
 }
 
+func (s AttachmentStore) List(ctx context.Context,userID,messageID int64)([]Attachment,error){
+	if s.Repo.DB==nil||userID<=0||messageID<=0{return nil,ErrInvalid};box,err:=s.Repo.EnsureMailbox(ctx,userID);if err!=nil{return nil,err};var visible bool;if err=s.Repo.DB.QueryRow(ctx,`SELECT EXISTS(SELECT 1 FROM mail_items WHERE mailbox_id=$1 AND message_id=$2)`,box.ID,messageID).Scan(&visible);err!=nil{return nil,err};if !visible{return nil,ErrNotFound}
+	rows,err:=s.Repo.DB.Query(ctx,`SELECT a.attachment_id,a.message_id,a.original_filename,b.byte_size,b.content_type,b.sha256 FROM mail_attachments a JOIN mail_attachment_blobs b ON b.blob_id=a.blob_id WHERE a.message_id=$1 ORDER BY a.ordinal`,messageID);if err!=nil{return nil,err};defer rows.Close();out:=[]Attachment{};for rows.Next(){var a Attachment;if err=rows.Scan(&a.ID,&a.MessageID,&a.Filename,&a.ByteSize,&a.ContentType,&a.SHA256);err!=nil{return nil,err};out=append(out,a)};return out,rows.Err()
+}
+
+func (s AttachmentStore) Detach(ctx context.Context,userID,messageID,attachmentID int64)error{
+	if s.Repo.DB==nil||userID<=0||messageID<=0||attachmentID<=0{return ErrInvalid};box,err:=s.Repo.EnsureMailbox(ctx,userID);if err!=nil{return err};tx,err:=s.Repo.DB.Begin(ctx);if err!=nil{return err};defer func(){_=tx.Rollback(ctx)}()
+	var blobID,storageKey string;var size int64;err=tx.QueryRow(ctx,`SELECT b.blob_id::text,b.storage_key::text,b.byte_size FROM mail_attachments a JOIN mail_attachment_blobs b ON b.blob_id=a.blob_id JOIN mail_messages m ON m.message_id=a.message_id WHERE a.attachment_id=$1 AND a.message_id=$2 AND m.sender_mailbox_id=$3 AND m.state='DRAFT' FOR UPDATE OF a`,attachmentID,messageID,box.ID).Scan(&blobID,&storageKey,&size);if errors.Is(err,pgx.ErrNoRows){return ErrNotFound};if err!=nil{return err}
+	if _,err=tx.Exec(ctx,`DELETE FROM mail_attachments WHERE attachment_id=$1`,attachmentID);err!=nil{return err};if _,err=tx.Exec(ctx,`DELETE FROM mail_attachment_blobs WHERE blob_id=$1::uuid`,blobID);err!=nil{return err};if _,err=tx.Exec(ctx,`INSERT INTO mail_blob_gc(storage_key,byte_size) VALUES($1::uuid,$2) ON CONFLICT(storage_key) DO NOTHING`,storageKey,size);err!=nil{return err};if _,err=tx.Exec(ctx,`UPDATE mailboxes SET storage_used_bytes=GREATEST(0,storage_used_bytes-$2),updated_at=now() WHERE mailbox_id=$1`,box.ID,size);err!=nil{return err};if _,err=tx.Exec(ctx,`INSERT INTO mail_events(mailbox_id,message_id,event_type,details) VALUES($1,$2,'DETACH',jsonb_build_object('attachment_id',$3,'bytes',$4))`,box.ID,messageID,attachmentID,size);err!=nil{return err};return tx.Commit(ctx)
+}
+
 func (s AttachmentStore) ResolveDownload(ctx context.Context,userID,attachmentID int64)(AttachmentFile,error){
 	if s.Repo.DB==nil||userID<=0||attachmentID<=0||strings.TrimSpace(s.Root)==""{return AttachmentFile{},ErrInvalid};box,err:=s.Repo.EnsureMailbox(ctx,userID);if err!=nil{return AttachmentFile{},err};var out Attachment;var storageKey string
 	err=s.Repo.DB.QueryRow(ctx,`SELECT a.attachment_id,a.message_id,a.original_filename,b.byte_size,b.content_type,b.sha256,b.storage_key::text
 FROM mail_attachments a JOIN mail_attachment_blobs b ON b.blob_id=a.blob_id
 WHERE a.attachment_id=$1 AND EXISTS(SELECT 1 FROM mail_items i WHERE i.mailbox_id=$2 AND i.message_id=a.message_id)`,attachmentID,box.ID).Scan(&out.ID,&out.MessageID,&out.Filename,&out.ByteSize,&out.ContentType,&out.SHA256,&storageKey)
-	if errors.Is(err,context.Canceled)||errors.Is(err,context.DeadlineExceeded){return AttachmentFile{},err};if err!=nil{return AttachmentFile{},ErrNotFound}
-	if _,err=safeStorageKey(storageKey);err!=nil{return AttachmentFile{},err};path:=filepath.Join(s.Root,storageKey+".blob");info,err:=os.Stat(path);if err!=nil||!info.Mode().IsRegular()||info.Size()!=out.ByteSize{return AttachmentFile{},ErrNotFound};return AttachmentFile{Attachment:out,Path:path},nil
+	if errors.Is(err,pgx.ErrNoRows){return AttachmentFile{},ErrNotFound};if err!=nil{return AttachmentFile{},err}
+	if _,err=safeStorageKey(storageKey);err!=nil{return AttachmentFile{},err};path:=filepath.Join(s.Root,storageKey+".blob");info,err:=os.Stat(path);if errors.Is(err,os.ErrNotExist){return AttachmentFile{},ErrNotFound};if err!=nil{return AttachmentFile{},err};if !info.Mode().IsRegular()||info.Size()!=out.ByteSize{return AttachmentFile{},ErrNotFound};return AttachmentFile{Attachment:out,Path:path},nil
 }
 
 func safeStorageKey(v string)(string,error){if len(v)!=36{return "",ErrInvalid};for i,r:=range v{if i==8||i==13||i==18||i==23{if r!='-'{return "",ErrInvalid};continue};if !((r>='0'&&r<='9')||(r>='a'&&r<='f')){return "",ErrInvalid}};return v,nil}
