@@ -3,7 +3,9 @@ package admin
 import (
 	"context"
 	"errors"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,6 +28,11 @@ type DiagnosticsSnapshot struct {
 		Retry int64 `json:"retry"`
 		Dead int64 `json:"dead"`
 		Processed24h int64 `json:"processed_24h"`
+		IndexedURLs int64 `json:"indexed_urls"`
+		ExcludedURLs int64 `json:"excluded_urls"`
+		ErrorURLs int64 `json:"error_urls"`
+		AverageQuality float64 `json:"average_quality"`
+		AverageSpam float64 `json:"average_spam"`
 	} `json:"index"`
 	Demand struct {
 		Watch int64 `json:"watch"`
@@ -49,6 +56,18 @@ type DiagnosticsSnapshot struct {
 		FailedInvoices int64 `json:"failed_invoices"`
 		UnprocessedPaymentEvents int64 `json:"unprocessed_payment_events"`
 	} `json:"billing"`
+	DataHub struct {
+		Draft int64 `json:"draft"`
+		Published int64 `json:"published"`
+		Suppressed int64 `json:"suppressed"`
+		PublicationEvents24h int64 `json:"publication_events_24h"`
+		TrendsToday int64 `json:"trends_today"`
+	} `json:"data_hub"`
+	Capacity *struct {
+		SnapshotID int64 `json:"snapshot_id"`
+		MeasuredDocuments int64 `json:"measured_documents"`
+		MeasuredAt time.Time `json:"measured_at"`
+	} `json:"capacity,omitempty"`
 }
 
 type DiagnosticsRepository struct{ DB *pgxpool.Pool }
@@ -82,6 +101,14 @@ SELECT
 FROM index_outbox`).Scan(&out.Index.Ready,&out.Index.Leased,&out.Index.Retry,&out.Index.Dead,&out.Index.Processed24h); err != nil { return DiagnosticsSnapshot{}, err }
 	if err := r.DB.QueryRow(ctx, `
 SELECT
+ count(*) FILTER(WHERE index_status='INDEXED'),
+ count(*) FILTER(WHERE index_status='EXCLUDED'),
+ count(*) FILTER(WHERE index_status='ERROR'),
+ COALESCE(avg(quality_score) FILTER(WHERE index_status='INDEXED'),0),
+ COALESCE(avg(spam_score) FILTER(WHERE index_status='INDEXED'),0)
+FROM urls`).Scan(&out.Index.IndexedURLs,&out.Index.ExcludedURLs,&out.Index.ErrorURLs,&out.Index.AverageQuality,&out.Index.AverageSpam); err != nil { return DiagnosticsSnapshot{}, err }
+	if err := r.DB.QueryRow(ctx, `
+SELECT
  count(*) FILTER(WHERE state='WATCH'),
  count(*) FILTER(WHERE state='OPEN'),
  count(*) FILTER(WHERE state='RESOLVED'),
@@ -103,5 +130,16 @@ SELECT
  (SELECT count(*) FROM billing_invoices WHERE status='OPEN'),
  (SELECT count(*) FROM billing_invoices WHERE status='FAILED'),
  (SELECT count(*) FROM billing_payment_events WHERE processed_at IS NULL)`).Scan(&out.Billing.Accounts,&out.Billing.ActiveSubscriptions,&out.Billing.PastDueSubscriptions,&out.Billing.OpenInvoices,&out.Billing.FailedInvoices,&out.Billing.UnprocessedPaymentEvents); err != nil { return DiagnosticsSnapshot{}, err }
+	if err := r.DB.QueryRow(ctx, `
+SELECT
+ count(*) FILTER(WHERE state='DRAFT'),
+ count(*) FILTER(WHERE state='PUBLISHED'),
+ count(*) FILTER(WHERE state='SUPPRESSED'),
+ (SELECT count(*) FROM datahub_publication_events WHERE created_at>=now()-interval '24 hours'),
+ (SELECT count(*) FROM datahub_trends_daily WHERE day=current_date)
+FROM datahub_pages`).Scan(&out.DataHub.Draft,&out.DataHub.Published,&out.DataHub.Suppressed,&out.DataHub.PublicationEvents24h,&out.DataHub.TrendsToday); err != nil { return DiagnosticsSnapshot{}, err }
+	var cap struct{SnapshotID int64 `json:"snapshot_id"`;MeasuredDocuments int64 `json:"measured_documents"`;MeasuredAt time.Time `json:"measured_at"`}
+	err:=r.DB.QueryRow(ctx,`SELECT snapshot_id,measured_documents,measured_at FROM capacity_snapshots ORDER BY measured_at DESC,snapshot_id DESC LIMIT 1`).Scan(&cap.SnapshotID,&cap.MeasuredDocuments,&cap.MeasuredAt)
+	if err==nil{out.Capacity=&cap}else if !errors.Is(err,pgx.ErrNoRows){return DiagnosticsSnapshot{},err}
 	return out, nil
 }
