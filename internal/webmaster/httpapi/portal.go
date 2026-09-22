@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/venomimonstro/poisk/internal/identity"
@@ -24,6 +25,7 @@ func (h PortalHandler) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(h.RequireConsumer)
 	r.Get("/sites", h.Base.ListSites)
+	r.Get("/usage", h.Usage)
 	r.With(h.RequireCSRF).Post("/sites", h.Base.AddSite)
 	r.With(h.RequireCSRF).Post("/sites/{siteID}/verification", h.Base.BeginVerification)
 	r.With(h.RequireCSRF).Post("/sites/{siteID}/verify", h.Base.CompleteVerification)
@@ -70,4 +72,17 @@ func (h PortalHandler) RequireCSRF(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (h PortalHandler) Usage(w http.ResponseWriter,r *http.Request){
+	user,ok:=currentUser(r);if !ok{writeError(w,http.StatusUnauthorized,"unauthorized");return}
+	if h.Base.Billing==nil{writeJSON(w,http.StatusOK,map[string]any{"product":"WEBMASTER_PRO","paid":false,"plan_code":"FREE","usage":map[string]int64{},"limits":map[string]int64{"sites":3,"sitemaps_month":10,"url_requests_month":100}});return}
+	accountID,err:=h.Base.Billing.AccountIDForUser(r.Context(),user.ID);if err!=nil{writeBillingError(w,err);return}
+	usage,err:=h.Base.Billing.Usage(r.Context(),user.ID,accountID);if err!=nil{writeBillingError(w,err);return}
+	now:=time.Now().UTC()
+	sites,err:=h.Base.Billing.EffectiveQuota(r.Context(),accountID,"WEBMASTER_PRO","sites",3,now);if err!=nil{writeBillingError(w,err);return}
+	sitemaps,err:=h.Base.Billing.EffectiveQuota(r.Context(),accountID,"WEBMASTER_PRO","sitemaps_month",10,now);if err!=nil{writeBillingError(w,err);return}
+	urls,err:=h.Base.Billing.EffectiveQuota(r.Context(),accountID,"WEBMASTER_PRO","url_requests_month",100,now);if err!=nil{writeBillingError(w,err);return}
+	plan:="FREE";paid:=sites.Paid||sitemaps.Paid||urls.Paid;if paid{if sites.PlanCode!=""{plan=sites.PlanCode}else if sitemaps.PlanCode!=""{plan=sitemaps.PlanCode}else if urls.PlanCode!=""{plan=urls.PlanCode}}
+	writeJSON(w,http.StatusOK,map[string]any{"product":"WEBMASTER_PRO","paid":paid,"plan_code":plan,"usage":usage,"limits":map[string]int64{"sites":sites.Limit,"sitemaps_month":sitemaps.Limit,"url_requests_month":urls.Limit},"period_end":urls.PeriodEnd})
 }
