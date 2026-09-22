@@ -32,3 +32,14 @@ func TestClassifyCapacitySignals(t *testing.T){
 	for _,b:=range got{delete(want,b.Code)}
 	if len(want)!=0{t.Fatalf("missing bottlenecks=%v got=%+v",want,got)}
 }
+
+func TestRecommendChoiceThresholdsAreAdvisoryAndDeterministic(t *testing.T){
+	cases:=[]struct{name string;b []Bottleneck;want string}{
+		{"healthy",nil,"STAY_SINGLE_NODE"},
+		{"crawler",[]Bottleneck{{Code:"CRAWL_BACKLOG",Severity:"MEDIUM"}},"MOVE_CRAWLER"},
+		{"search_read_capacity",[]Bottleneck{{Code:"QPS_CAPACITY",Severity:"HIGH"}},"ADD_REPLICA"},
+		{"search_cpu",[]Bottleneck{{Code:"SEARCH_SLO",Severity:"HIGH"},{Code:"CPU_PRESSURE",Severity:"HIGH"}},"SHARD_SEARCH"},
+		{"storage",[]Bottleneck{{Code:"PROJECTED_STORAGE",Severity:"HIGH"}},"SHARD_SEARCH"},
+	}
+	for _,tc:=range cases{t.Run(tc.name,func(t *testing.T){if got:=RecommendChoice(tc.b);got!=tc.want{t.Fatalf("choice=%q want=%q",got,tc.want)}})}
+}
