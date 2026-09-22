@@ -42,9 +42,17 @@ async function fetchPage(path: string): Promise<HubPage | null> {
 
 function dataPath(segments: string[]): string {
   if (!segments.length || segments.length > 4) return "";
-  const decoded = segments.map((segment) => decodeURIComponent(segment));
-  if (decoded.some((segment) => segment.includes("/") || segment.includes("\\") || segment === "." || segment === "..")) return "";
-  return `/data/${decoded.join("/")}`;
+  if (segments.some((segment) => !segment || segment.length > 180 || segment.includes("/") || segment.includes("\\") || segment === "." || segment === "..")) return "";
+  return `/data/${segments.join("/")}`;
+}
+
+function safeExternalURL(value: string): string {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
 }
 
 function snapshotString(snapshot: Record<string, unknown>, key: string): string {
@@ -98,7 +106,7 @@ export default async function DataHubPage({ params }: { params: Promise<{ segmen
   const organizations = await fetchOrganizations(page);
   const organizationName = snapshotString(page.snapshot, "name");
   const organizationAddress = snapshotString(page.snapshot, "address");
-  const organizationWebsite = snapshotString(page.snapshot, "website");
+  const organizationWebsite = safeExternalURL(snapshotString(page.snapshot, "website"));
   const websiteHost = snapshotString(page.snapshot, "host");
   const linkedOrganizations = snapshotNumber(page.snapshot, "linked_organizations");
   const indexedURLs = snapshotNumber(page.snapshot, "indexed_urls");
@@ -134,17 +142,20 @@ export default async function DataHubPage({ params }: { params: Promise<{ segmen
         <section className="dataHubSection">
           <h2>Организации</h2>
           <div className="dataHubGrid">
-            {organizations.map((item) => (
-              <article className="dataHubCard" key={item.place_id}>
-                <h3>{item.name}</h3>
-                {item.address && <p>{item.address}</p>}
-                <div className="dataHubCardMeta">Качество: {Math.round(item.quality_score)}/100</div>
-                <div className="dataHubCardLinks">
-                  <Link href={`/data/organization/org-${item.place_id}`}>Карточка</Link>
-                  {item.website && <a href={item.website} rel="nofollow noopener noreferrer">Сайт</a>}
-                </div>
-              </article>
-            ))}
+            {organizations.map((item) => {
+              const website = item.website ? safeExternalURL(item.website) : "";
+              return (
+                <article className="dataHubCard" key={item.place_id}>
+                  <h3>{item.name}</h3>
+                  {item.address && <p>{item.address}</p>}
+                  <div className="dataHubCardMeta">Качество: {Math.round(item.quality_score)}/100</div>
+                  <div className="dataHubCardLinks">
+                    <Link href={`/data/organization/org-${item.place_id}`}>Карточка</Link>
+                    {website && <a href={website} rel="nofollow noopener noreferrer">Сайт</a>}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
       )}
