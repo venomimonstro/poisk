@@ -214,6 +214,28 @@ services:
     mem_limit: 192m
     cpus: 0.30
 
+  mail-gateway-worker:
+    profiles: ["internet-mail"]
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["mail-gateway-worker"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MAIL_BLOB_DIR: /mail-blobs
+    volumes:
+      - mail_blob_data:/mail-blobs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.50
+
   frontend:
     image: ${FRONTEND_IMAGE:-poisk/frontend:local}
     build:
