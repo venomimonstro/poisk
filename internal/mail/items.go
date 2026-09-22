@@ -16,7 +16,7 @@ func normalizeFolder(kind string)(string,error){kind=strings.ToUpper(strings.Tri
 func (r Repository) ListFolder(ctx context.Context,userID int64,kind string,limit int,beforeID int64)([]Item,error){
 	if r.DB==nil||userID<=0||beforeID<0{return nil,ErrInvalid};var err error;if kind,err=normalizeFolder(kind);err!=nil{return nil,err};if limit<=0{limit=50};if limit>100{limit=100}
 	box,err:=r.EnsureMailbox(ctx,userID);if err!=nil{return nil,err}
-	rows,err:=r.DB.Query(ctx,`SELECT i.mail_item_id,i.item_role,i.is_read,i.is_starred,i.created_at,m.message_id,m.thread_id,m.subject,m.body_text,COALESCE(m.body_html,''),m.provenance,m.state,COALESCE(m.external_sender_address,s.address,''),m.sent_at,m.created_at,m.updated_at
+	rows,err:=r.DB.Query(ctx,`SELECT i.mail_item_id,i.item_role,i.is_read,i.is_starred,i.created_at,m.message_id,m.thread_id,m.subject,m.body_text,COALESCE(m.body_html,''),m.provenance,m.state,COALESCE(m.sender_external_address,s.address,''),m.sent_at,m.created_at,m.updated_at
 FROM mail_items i JOIN mail_folders f ON f.folder_id=i.folder_id AND f.mailbox_id=i.mailbox_id JOIN mail_messages m ON m.message_id=i.message_id LEFT JOIN mailboxes s ON s.mailbox_id=m.sender_mailbox_id
 WHERE i.mailbox_id=$1 AND f.kind=$2 AND ($3=0 OR i.mail_item_id<$3)
 ORDER BY i.mail_item_id DESC LIMIT $4`,box.ID,kind,beforeID,limit);if err!=nil{return nil,err};defer rows.Close()
@@ -25,7 +25,7 @@ ORDER BY i.mail_item_id DESC LIMIT $4`,box.ID,kind,beforeID,limit);if err!=nil{r
 
 func (r Repository) GetItem(ctx context.Context,userID,itemID int64)(Item,error){
 	if r.DB==nil||userID<=0||itemID<=0{return Item{},ErrInvalid};box,err:=r.EnsureMailbox(ctx,userID);if err!=nil{return Item{},err};var x Item
-	err=r.DB.QueryRow(ctx,`SELECT i.mail_item_id,f.kind,i.item_role,i.is_read,i.is_starred,i.created_at,m.message_id,m.thread_id,m.subject,m.body_text,COALESCE(m.body_html,''),m.provenance,m.state,COALESCE(m.external_sender_address,s.address,''),m.sent_at,m.created_at,m.updated_at
+	err=r.DB.QueryRow(ctx,`SELECT i.mail_item_id,f.kind,i.item_role,i.is_read,i.is_starred,i.created_at,m.message_id,m.thread_id,m.subject,m.body_text,COALESCE(m.body_html,''),m.provenance,m.state,COALESCE(m.sender_external_address,s.address,''),m.sent_at,m.created_at,m.updated_at
 FROM mail_items i JOIN mail_folders f ON f.folder_id=i.folder_id AND f.mailbox_id=i.mailbox_id JOIN mail_messages m ON m.message_id=i.message_id LEFT JOIN mailboxes s ON s.mailbox_id=m.sender_mailbox_id
 WHERE i.mail_item_id=$1 AND i.mailbox_id=$2`,itemID,box.ID).Scan(&x.ItemID,&x.Folder,&x.Role,&x.IsRead,&x.IsStarred,&x.CreatedAt,&x.Message.ID,&x.Message.ThreadID,&x.Message.Subject,&x.Message.BodyText,&x.Message.BodyHTML,&x.Message.Provenance,&x.Message.State,&x.Message.SenderAddress,&x.Message.SentAt,&x.Message.CreatedAt,&x.Message.UpdatedAt)
 	if errors.Is(err,pgx.ErrNoRows){return Item{},ErrNotFound};if err!=nil{return Item{},err};recipients,err:=r.messageRecipients(ctx,x.Message.ID,box.ID);if err!=nil{return Item{},err};x.Message.Recipients=recipients;return x,nil
@@ -68,7 +68,7 @@ func (r Repository) MoveSpam(ctx context.Context,userID,itemID int64,spam bool)e
 
 func (r Repository) Search(ctx context.Context,userID int64,query string,limit int)([]Item,error){
 	if r.DB==nil||userID<=0{return nil,ErrInvalid};query=strings.TrimSpace(query);if query==""||len([]rune(query))>256{return nil,ErrInvalid};if limit<=0{limit=50};if limit>100{limit=100};box,err:=r.EnsureMailbox(ctx,userID);if err!=nil{return nil,err}
-	rows,err:=r.DB.Query(ctx,`SELECT i.mail_item_id,f.kind,i.item_role,i.is_read,i.is_starred,i.created_at,m.message_id,m.thread_id,m.subject,m.body_text,COALESCE(m.body_html,''),m.provenance,m.state,COALESCE(m.external_sender_address,s.address,''),m.sent_at,m.created_at,m.updated_at
+	rows,err:=r.DB.Query(ctx,`SELECT i.mail_item_id,f.kind,i.item_role,i.is_read,i.is_starred,i.created_at,m.message_id,m.thread_id,m.subject,m.body_text,COALESCE(m.body_html,''),m.provenance,m.state,COALESCE(m.sender_external_address,s.address,''),m.sent_at,m.created_at,m.updated_at
 FROM mail_items i JOIN mail_folders f ON f.folder_id=i.folder_id AND f.mailbox_id=i.mailbox_id JOIN mail_messages m ON m.message_id=i.message_id LEFT JOIN mailboxes s ON s.mailbox_id=m.sender_mailbox_id
 WHERE i.mailbox_id=$1 AND f.kind<>'TRASH' AND m.search_vector @@ websearch_to_tsquery('simple',$2)
 ORDER BY ts_rank_cd(m.search_vector,websearch_to_tsquery('simple',$2)) DESC,i.mail_item_id DESC LIMIT $3`,box.ID,query,limit);if err!=nil{return nil,err};defer rows.Close();out:=[]Item{};for rows.Next(){var x Item;if err:=rows.Scan(&x.ItemID,&x.Folder,&x.Role,&x.IsRead,&x.IsStarred,&x.CreatedAt,&x.Message.ID,&x.Message.ThreadID,&x.Message.Subject,&x.Message.BodyText,&x.Message.BodyHTML,&x.Message.Provenance,&x.Message.State,&x.Message.SenderAddress,&x.Message.SentAt,&x.Message.CreatedAt,&x.Message.UpdatedAt);err!=nil{return nil,err};out=append(out,x)};return out,rows.Err()
