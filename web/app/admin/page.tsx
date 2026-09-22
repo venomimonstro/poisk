@@ -11,6 +11,12 @@ type Ops = {
   runtime: { goroutines: number; heap_alloc_bytes: number; heap_sys_bytes: number };
   resources: { state: string; disk_used_pct: number; memory_used_pct: number; updated_at: string };
 };
+type Owner = {
+  users: { total: number; active: number; locked: number; disabled: number };
+  webmaster: { sites: number; verified: number; pending: number; suspended: number };
+  directory: { organizations: number; addresses: number };
+  capacity?: { snapshot_id: number; measured_documents: number; measured_at: string; bottlenecks: Array<{ code?: string; severity?: string }> };
+};
 type Domain = { domain_id: number; host: string; status: string; policy: string; trust_level: number; quality_score: number; demand_score: number };
 type Preview = { preview_token: string; expires_at: string; host: string; before: { domain_id: number; status: string; policy: string }; after: { domain_id: number; status: string; policy: string } };
 
@@ -29,6 +35,7 @@ export default function AdminPage() {
   const [me, setMe] = useState<AdminMe | null>(null);
   const [csrf, setCSRF] = useState("");
   const [ops, setOps] = useState<Ops | null>(null);
+  const [owner, setOwner] = useState<Owner | null>(null);
   const [error, setError] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -44,7 +51,8 @@ export default function AdminPage() {
     const current = await readJSON<AdminMe>("/api/admin/me");
     const token = await readJSON<{ csrf_token: string }>("/api/admin/csrf");
     const snapshot = await readJSON<Ops>("/api/admin/status");
-    setMe(current); setCSRF(token.csrf_token); setOps(snapshot); setError("");
+    const ownerSnapshot = current.role === "SUPERADMIN" ? await readJSON<Owner>("/api/admin/owner") : null;
+    setMe(current); setCSRF(token.csrf_token); setOps(snapshot); setOwner(ownerSnapshot); setError("");
   }, []);
 
   useEffect(() => { void refresh().catch(() => setMe(null)); }, [refresh]);
@@ -58,12 +66,13 @@ export default function AdminPage() {
       setCSRF(result.csrf_token); setMe({ admin_id: result.admin.id, email: result.admin.email, role: result.admin.role, expires_at: result.expires_at });
       setPassword(""); setFactor("");
       setOps(await readJSON<Ops>("/api/admin/status"));
+      setOwner(result.admin.role === "SUPERADMIN" ? await readJSON<Owner>("/api/admin/owner") : null);
     } catch (e) { setError(e instanceof Error ? e.message : "login_failed"); }
   }
 
   async function logout() {
     try { await readJSON("/api/admin/logout", { method: "POST", headers: { "X-CSRF-Token": csrf } }); } catch { /* cookie is cleared on success only */ }
-    setMe(null); setCSRF(""); setOps(null); setDomains([]); setPreview(null);
+    setMe(null); setCSRF(""); setOps(null); setOwner(null); setDomains([]); setPreview(null);
   }
 
   async function searchDomains() {
@@ -111,6 +120,16 @@ export default function AdminPage() {
       <div style={{ display: "flex", gap: 8 }}><button style={button} onClick={() => void refresh()}>Обновить</button><button style={{ ...button, background: "#111", color: "white" }} onClick={() => void logout()}>Выйти</button></div>
     </header>
     {error && <div role="alert" style={{ ...card, borderColor: "#b00" }}>{error}</div>}
+    {owner && <section style={{ ...card, display: "grid", gap: 14 }}>
+      <div><strong>Owner overview</strong><div style={{ color: "#666", marginTop: 4 }}>Read-only коммерческий и продуктовый срез</div></div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 10 }}>
+        <div><small>Пользователи</small><div style={{ fontSize: 28, fontWeight: 800 }}>{owner.users.total}</div><div>active {owner.users.active} · locked {owner.users.locked} · disabled {owner.users.disabled}</div></div>
+        <div><small>Webmaster sites</small><div style={{ fontSize: 28, fontWeight: 800 }}>{owner.webmaster.sites}</div><div>verified {owner.webmaster.verified} · pending {owner.webmaster.pending}</div></div>
+        <div><small>Организации</small><div style={{ fontSize: 28, fontWeight: 800 }}>{owner.directory.organizations}</div><div>Активные карточки каталога</div></div>
+        <div><small>Адреса</small><div style={{ fontSize: 28, fontWeight: 800 }}>{owner.directory.addresses}</div><div>Активный адресный индекс</div></div>
+      </div>
+      {owner.capacity ? <div style={{ borderTop: "1px solid #eee", paddingTop: 12 }}><strong>Последний Capacity snapshot #{owner.capacity.snapshot_id}</strong><div>Документов: {owner.capacity.measured_documents.toLocaleString("ru-RU")} · {new Date(owner.capacity.measured_at).toLocaleString()}</div><div>Проблемы: {owner.capacity.bottlenecks?.length ? owner.capacity.bottlenecks.map(b => `${b.code || "unknown"}${b.severity ? ` (${b.severity})` : ""}`).join(", ") : "не зафиксированы"}</div></div> : <div style={{ borderTop: "1px solid #eee", paddingTop: 12 }}>Capacity benchmark ещё не зафиксирован.</div>}
+    </section>}
     {ops && <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
       <div style={card}><strong>Resources</strong><div>State: {ops.resources.state}</div><div>Disk: {ops.resources.disk_used_pct.toFixed(1)}%</div><div>Memory: {ops.resources.memory_used_pct.toFixed(1)}%</div></div>
       <div style={card}><strong>Crawler</strong><div>Ready {ops.crawl.ready} · Leased {ops.crawl.leased}</div><div>Retry {ops.crawl.retry} · Dead {ops.crawl.dead}</div></div>
