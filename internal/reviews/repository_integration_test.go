@@ -50,3 +50,16 @@ func TestOwnerReplyRequiresActiveClaimForSameConsumer(t *testing.T){
 	if _,err:=pool.Exec(ctx,`UPDATE organization_claims SET status='REVOKED',revoked_at=now(),updated_at=now() WHERE claim_id=$1`,claimID);err!=nil{t.Fatal(err)}
 	if _,err:=repo.Reply(ctx,owner,review.ID,"Ответ после отзыва прав владения.");!errors.Is(err,ErrForbidden){t.Fatalf("revoked claim reply err=%v",err)}
 }
+
+func TestClaimActivationSuppressesExistingOwnerReview(t *testing.T){
+	pool:=reviewDB(t);repo:=Repository{DB:pool};ctx:=context.Background();owner:=createConsumer(t,pool,"prior-owner-review");placeID:=createPlace(t,pool,"Prior owner place")
+	review,err:=repo.Upsert(ctx,owner,placeID,5,"Отзыв был создан до подтверждения владения компанией.");if err!=nil{t.Fatal(err)}
+	stats,err:=repo.Stats(ctx,placeID);if err!=nil{t.Fatal(err)};if stats.Count!=1{t.Fatalf("pre-claim stats=%+v",stats)}
+	var domainID int64;host:=fmt.Sprintf("prior-claim-%d.example.test",time.Now().UnixNano());if err:=pool.QueryRow(ctx,`INSERT INTO domains(host) VALUES($1) RETURNING domain_id`,host).Scan(&domainID);err!=nil{t.Fatal(err)}
+	var wmID int64;if err:=pool.QueryRow(ctx,`INSERT INTO webmaster_users(email,password_hash,status,consumer_user_id) SELECT email,password_hash,'ACTIVE',user_id FROM consumer_users WHERE user_id=$1 RETURNING user_id`,owner).Scan(&wmID);err!=nil{t.Fatal(err)}
+	var siteID int64;if err:=pool.QueryRow(ctx,`INSERT INTO webmaster_sites(user_id,domain_id,origin,host,status,verified_at,verification_method) VALUES($1,$2,$3,$4,'VERIFIED',now(),'DNS_TXT') RETURNING site_id`,wmID,domainID,"https://"+host,host).Scan(&siteID);err!=nil{t.Fatal(err)}
+	if _,err:=pool.Exec(ctx,`INSERT INTO organization_claims(place_id,user_id,site_id,proof_type,proof_host,status) VALUES($1,$2,$3,'VERIFIED_WEBSITE_HOST',$4,'ACTIVE')`,placeID,wmID,siteID,host);err!=nil{t.Fatal(err)}
+	var status,reason string;if err:=pool.QueryRow(ctx,`SELECT status,change_reason FROM organization_reviews WHERE review_id=$1`,review.ID).Scan(&status,&reason);err!=nil{t.Fatal(err)};if status!="HIDDEN"||reason!="OWNER_CLAIM_SELF_REVIEW"{t.Fatalf("status=%s reason=%s",status,reason)}
+	stats,err=repo.Stats(ctx,placeID);if err!=nil{t.Fatal(err)};if stats.Count!=0||stats.Average!=0{t.Fatalf("owner self-review still affects rating: %+v",stats)}
+	var revisions int;if err:=pool.QueryRow(ctx,`SELECT count(*) FROM organization_review_revisions WHERE review_id=$1`,review.ID).Scan(&revisions);err!=nil{t.Fatal(err)};if revisions!=2{t.Fatalf("revisions=%d",revisions)}
+}
