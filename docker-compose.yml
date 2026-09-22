@@ -176,6 +176,23 @@ services:
     mem_limit: 96m
     cpus: 0.20
 
+  demand-worker:
+    image: ${BACKEND_IMAGE:-poisk/backend:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["demand-worker"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    cpus: 0.25
+
   frontend:
     image: ${FRONTEND_IMAGE:-poisk/frontend:local}
     build:
