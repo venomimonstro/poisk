@@ -12,7 +12,7 @@ function allowed(path:string[],method:string){
   if(path.length===1&&path[0]==="search")return method==="GET";
   if(path.length===2&&path[0]==="attachments"&&/^\d+$/.test(path[1]))return method==="GET";
   if(path.length===1&&path[0]==="drafts")return method==="POST";
-  if(path.length===2&&path[0]==="drafts"&&/^\d+$/.test(path[1]))return method==="PUT";
+  if(path.length===2&&path[0]==="drafts"&&/^\d+$/.test(path[1]))return method==="GET"||method==="PUT";
   if(path.length===3&&path[0]==="drafts"&&/^\d+$/.test(path[1])&&path[2]==="send")return method==="POST";
   if(path.length===3&&path[0]==="drafts"&&/^\d+$/.test(path[1])&&path[2]==="attachments")return method==="POST";
   if(path.length===4&&path[0]==="drafts"&&/^\d+$/.test(path[1])&&path[2]==="attachments"&&/^\d+$/.test(path[3]))return method==="DELETE";
