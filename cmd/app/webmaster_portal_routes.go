@@ -10,7 +10,7 @@ import (
 	webmasterhttp "github.com/venomimonstro/poisk/internal/webmaster/httpapi"
 )
 
-func registerWebmasterPortalRoutes(router chi.Router, apiGuard *guard.Middleware, pool *pgxpool.Pool, service *webmaster.Service, billingRepo *billing.Repository) {
+func registerWebmasterPortalRoutes(router chi.Router, apiGuard guard.Middleware, pool *pgxpool.Pool, service *webmaster.Service, billingRepo *billing.Repository) {
 	identityService := &identity.Service{Repo: identity.NewRepository(pool)}
 	base := webmasterhttp.Handler{Service: service, Billing: billingRepo}
 	portal := webmasterhttp.PortalHandler{Base: base, Identity: identityService}
