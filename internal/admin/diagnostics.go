@@ -63,6 +63,18 @@ type DiagnosticsSnapshot struct {
 		PublicationEvents24h int64 `json:"publication_events_24h"`
 		TrendsToday int64 `json:"trends_today"`
 	} `json:"data_hub"`
+	Mail struct {
+		ActiveMailboxes int64 `json:"active_mailboxes"`
+		DisabledMailboxes int64 `json:"disabled_mailboxes"`
+		DraftMessages int64 `json:"draft_messages"`
+		SentMessages int64 `json:"sent_messages"`
+		InboxItems int64 `json:"inbox_items"`
+		SpamItems int64 `json:"spam_items"`
+		TrashItems int64 `json:"trash_items"`
+		AttachmentBytes int64 `json:"attachment_bytes"`
+		BlobGCBacklog int64 `json:"blob_gc_backlog"`
+		SendEvents24h int64 `json:"send_events_24h"`
+	} `json:"mail"`
 	Capacity *struct {
 		SnapshotID int64 `json:"snapshot_id"`
 		MeasuredDocuments int64 `json:"measured_documents"`
@@ -138,6 +150,18 @@ SELECT
  (SELECT count(*) FROM datahub_publication_events WHERE created_at>=now()-interval '24 hours'),
  (SELECT count(*) FROM datahub_trends_daily WHERE day=current_date)
 FROM datahub_pages`).Scan(&out.DataHub.Draft,&out.DataHub.Published,&out.DataHub.Suppressed,&out.DataHub.PublicationEvents24h,&out.DataHub.TrendsToday); err != nil { return DiagnosticsSnapshot{}, err }
+	if err := r.DB.QueryRow(ctx, `
+SELECT
+ (SELECT count(*) FROM mailboxes WHERE status='ACTIVE'),
+ (SELECT count(*) FROM mailboxes WHERE status='DISABLED'),
+ (SELECT count(*) FROM mail_messages WHERE state='DRAFT'),
+ (SELECT count(*) FROM mail_messages WHERE state='SENT'),
+ (SELECT count(*) FROM mail_items i JOIN mail_folders f ON f.folder_id=i.folder_id AND f.mailbox_id=i.mailbox_id WHERE f.kind='INBOX'),
+ (SELECT count(*) FROM mail_items i JOIN mail_folders f ON f.folder_id=i.folder_id AND f.mailbox_id=i.mailbox_id WHERE f.kind='SPAM'),
+ (SELECT count(*) FROM mail_items i JOIN mail_folders f ON f.folder_id=i.folder_id AND f.mailbox_id=i.mailbox_id WHERE f.kind='TRASH'),
+ (SELECT COALESCE(sum(byte_size),0) FROM mail_attachment_blobs),
+ (SELECT count(*) FROM mail_blob_gc),
+ (SELECT count(*) FROM mail_events WHERE event_type='SEND' AND created_at>=now()-interval '24 hours')`).Scan(&out.Mail.ActiveMailboxes,&out.Mail.DisabledMailboxes,&out.Mail.DraftMessages,&out.Mail.SentMessages,&out.Mail.InboxItems,&out.Mail.SpamItems,&out.Mail.TrashItems,&out.Mail.AttachmentBytes,&out.Mail.BlobGCBacklog,&out.Mail.SendEvents24h); err != nil { return DiagnosticsSnapshot{}, err }
 	var cap struct{SnapshotID int64 `json:"snapshot_id"`;MeasuredDocuments int64 `json:"measured_documents"`;MeasuredAt time.Time `json:"measured_at"`}
 	err:=r.DB.QueryRow(ctx,`SELECT snapshot_id,measured_documents,measured_at FROM capacity_snapshots ORDER BY measured_at DESC,snapshot_id DESC LIMIT 1`).Scan(&cap.SnapshotID,&cap.MeasuredDocuments,&cap.MeasuredAt)
 	if err==nil{out.Capacity=&cap}else if !errors.Is(err,pgx.ErrNoRows){return DiagnosticsSnapshot{},err}
