@@ -11,7 +11,7 @@ import (
 	"github.com/venomimonstro/poisk/internal/platform/guard"
 )
 
-func registerAccountRoutes(router chi.Router,apiGuard *guard.Middleware,cfg config.Config,pool *pgxpool.Pool){
+func registerAccountRoutes(router chi.Router,apiGuard guard.Middleware,cfg config.Config,pool *pgxpool.Pool){
 	repo:=identity.NewRepository(pool)
 	service:=&identity.Service{Repo:repo}
 	env:=strings.ToLower(strings.TrimSpace(cfg.Env))
