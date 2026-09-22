@@ -3,7 +3,6 @@ package httpapi
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/venomimonstro/poisk/internal/admin"
 )
@@ -20,5 +19,3 @@ func (h Handler) DataHubPreview(w http.ResponseWriter,r *http.Request){
 func (h Handler) DataHubApply(w http.ResponseWriter,r *http.Request){
 	if h.Service==nil{writeError(w,503,"admin_unavailable");return};session,ok:=SessionFromContext(r.Context());if !ok{writeError(w,401,"unauthorized");return};var in dataHubApplyRequest;if err:=decodeOne(w,r,&in,4<<10);err!=nil{writeError(w,400,"invalid_json");return};row,err:=h.Service.ApplyDataHubMutation(r.Context(),session,in.PreviewToken);if err!=nil{switch{case errors.Is(err,admin.ErrForbidden):writeError(w,403,"forbidden");case errors.Is(err,admin.ErrPreviewInvalid):writeError(w,409,"preview_invalid_or_expired");case errors.Is(err,admin.ErrNotFound):writeError(w,404,"datahub_page_not_found");default:writeError(w,503,"datahub_apply_failed")};return};writeJSON(w,200,row)
 }
-
-var _ = strconv.IntSize
