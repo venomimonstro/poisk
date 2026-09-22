@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/venomimonstro/poisk/internal/identity"
 	mailcore "github.com/venomimonstro/poisk/internal/mail"
+	gatewayhttp "github.com/venomimonstro/poisk/internal/mail/gatewayhttp"
 	mailhttp "github.com/venomimonstro/poisk/internal/mail/httpapi"
 	"github.com/venomimonstro/poisk/internal/platform/guard"
 )
@@ -17,4 +18,11 @@ func registerMailRoutes(router chi.Router,apiGuard guard.Middleware,pool *pgxpoo
 	repo:=mailcore.Repository{DB:pool};store:=mailcore.AttachmentStore{Repo:repo,Root:root}
 	handler:=mailhttp.Handler{Repo:repo,Store:store,Identity:identityService}
 	router.Mount("/api/mail",apiGuard.Protect(handler.Routes()))
+
+	gateway:=gatewayhttp.Handler{
+		Repo:repo,
+		Inbound:mailcore.InboundStore{Repo:repo,Root:root},
+		Secret:[]byte(strings.TrimSpace(os.Getenv("MAIL_GATEWAY_SHARED_SECRET"))),
+	}
+	router.Mount("/internal/mail-gateway",apiGuard.Protect(gateway.Routes()))
 }
