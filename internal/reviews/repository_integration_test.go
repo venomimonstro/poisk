@@ -14,7 +14,8 @@ import (
 )
 
 func reviewDB(t *testing.T)*pgxpool.Pool{t.Helper();dsn:=os.Getenv("TEST_DATABASE_URL");if dsn==""{t.Fatal("TEST_DATABASE_URL is required")};pool,err:=pgxpool.New(context.Background(),dsn);if err!=nil{t.Fatal(err)};if err=pool.Ping(context.Background());err!=nil{pool.Close();t.Fatal(err)};t.Cleanup(pool.Close);return pool}
-func createConsumer(t *testing.T,pool *pgxpool.Pool,prefix string)int64{t.Helper();var id int64;email:=fmt.Sprintf("%s-%d@example.test",prefix,time.Now().UnixNano());if err:=pool.QueryRow(context.Background(),`INSERT INTO consumer_users(email,password_hash) VALUES($1,$2) RETURNING user_id`,email,"integration-password-hash-000000").Scan(&id);err!=nil{t.Fatal(err)};return id}
+func createConsumer(t *testing.T,pool *pgxpool.Pool,prefix string)int64{t.Helper();var id int64;email:=fmt.Sprintf("%s-%d@example.test",prefix,time.Now().UnixNano());if err:=pool.QueryRow(context.Background(),`INSERT INTO consumer_users(email,password_hash,email_verified_at) VALUES($1,$2,now()) RETURNING user_id`,email,"integration-password-hash-000000").Scan(&id);err!=nil{t.Fatal(err)};return id}
+func createUnverifiedConsumer(t *testing.T,pool *pgxpool.Pool,prefix string)int64{t.Helper();var id int64;email:=fmt.Sprintf("%s-%d@example.test",prefix,time.Now().UnixNano());if err:=pool.QueryRow(context.Background(),`INSERT INTO consumer_users(email,password_hash) VALUES($1,$2) RETURNING user_id`,email,"integration-password-hash-000000").Scan(&id);err!=nil{t.Fatal(err)};return id}
 func createPlace(t *testing.T,pool *pgxpool.Pool,prefix string)int64{t.Helper();var id int64;name:=fmt.Sprintf("%s %d",prefix,time.Now().UnixNano());if err:=pool.QueryRow(context.Background(),`INSERT INTO organizations(name,normalized_name,status,quality_score,source_count) VALUES($1,lower($1),'ACTIVE',80,1) RETURNING place_id`,name).Scan(&id);err!=nil{t.Fatal(err)};return id}
 
 func TestReviewRevisionAndVisibleRatingLifecycle(t *testing.T){
@@ -27,6 +28,13 @@ func TestReviewRevisionAndVisibleRatingLifecycle(t *testing.T){
 	if err:=repo.SoftDelete(ctx,userID,first.ID);err!=nil{t.Fatal(err)};stats,err=repo.Stats(ctx,placeID);if err!=nil{t.Fatal(err)};if stats.Count!=0||stats.Average!=0{t.Fatalf("deleted review still rated: %+v",stats)}
 	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM organization_review_revisions WHERE review_id=$1`,first.ID).Scan(&revisions);err!=nil{t.Fatal(err)};if revisions!=3{t.Fatalf("revisions after delete=%d",revisions)}
 	if _,err:=pool.Exec(ctx,`DELETE FROM organization_reviews WHERE review_id=$1`,first.ID);err==nil{t.Fatal("hard delete unexpectedly succeeded")}
+}
+
+func TestFreshUnverifiedAccountStartsPending(t *testing.T){
+	pool:=reviewDB(t);repo:=Repository{DB:pool};ctx:=context.Background();userID:=createUnverifiedConsumer(t,pool,"fresh-unverified");placeID:=createPlace(t,pool,"Trust gate place")
+	review,err:=repo.Upsert(ctx,userID,placeID,5,"Новый аккаунт оставляет отзыв на модерацию.");if err!=nil{t.Fatal(err)};if review.Status!="PENDING"{t.Fatalf("status=%s",review.Status)}
+	stats,err:=repo.Stats(ctx,placeID);if err!=nil{t.Fatal(err)};if stats.Count!=0||stats.Average!=0{t.Fatalf("pending fresh account affects rating: %+v",stats)}
+	var reason string;if err:=pool.QueryRow(ctx,`SELECT change_reason FROM organization_reviews WHERE review_id=$1`,review.ID).Scan(&reason);err!=nil{t.Fatal(err)};if reason!="USER_CREATE_TRUST_REVIEW"{t.Fatalf("reason=%s",reason)}
 }
 
 func TestModeratedReviewCannotSelfRestoreVisible(t *testing.T){
