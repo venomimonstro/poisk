@@ -19,7 +19,7 @@ Reference workloads are versioned in:
 - `deploy/capacity/geo.txt`
 - `deploy/capacity/address.txt`
 
-Replace/add cases only with valid bounded production routes. Do not add authentication secrets or user-specific data to these files.
+They are copied into the backend runtime image under `/app/deploy/capacity/`. Replace/add cases only with valid bounded production routes. Do not add authentication secrets or user-specific data to these files.
 
 ## Measure Manticore bytes
 
@@ -33,25 +33,21 @@ Record that integer as `CAPACITY_MANTICORE_BYTES` for the benchmark run.
 
 ## Current-corpus read-only benchmark
 
-Example environment:
+The backend image is distroless, so use `docker compose run` instead of trying to open a shell in it.
 
 ```sh
-export CAPACITY_MODE=LIVE_READONLY
-export CAPACITY_BASE_URL=http://backend:8080
-export CAPACITY_DURATION_SECONDS=60
-export CAPACITY_CONCURRENCY=16
-export CAPACITY_TARGET_QPS=100
-export CAPACITY_MANTICORE_BYTES=<measured integer>
-export CAPACITY_SEARCH_QUERIES=/app/deploy/capacity/search.txt
-export CAPACITY_GEO_URLS=/app/deploy/capacity/geo.txt
-export CAPACITY_ADDRESS_URLS=/app/deploy/capacity/address.txt
-export CAPACITY_DISK_PATH=/
-```
-
-Run inside the backend image/container where the workload files are available:
-
-```sh
-./app capacityctl benchmark current-baseline
+docker compose run --rm \
+  -e CAPACITY_MODE=LIVE_READONLY \
+  -e CAPACITY_BASE_URL=http://backend:8080 \
+  -e CAPACITY_DURATION_SECONDS=60 \
+  -e CAPACITY_CONCURRENCY=16 \
+  -e CAPACITY_TARGET_QPS=100 \
+  -e CAPACITY_MANTICORE_BYTES=<measured integer> \
+  -e CAPACITY_SEARCH_QUERIES=/app/deploy/capacity/search.txt \
+  -e CAPACITY_GEO_URLS=/app/deploy/capacity/geo.txt \
+  -e CAPACITY_ADDRESS_URLS=/app/deploy/capacity/address.txt \
+  -e CAPACITY_DISK_PATH=/ \
+  backend capacityctl benchmark current-baseline
 ```
 
 The immutable snapshot records:
@@ -85,19 +81,20 @@ Apply migrations in that isolated project. Populate the corpus using the same ca
 
 Before benchmarking, verify the isolated database reports at least **1,000,000** rows where `urls.index_status='INDEXED'`. `capacityctl` also checks this and refuses `ISOLATED_1M` below that threshold.
 
-Then run with:
+Measure the isolated Manticore volume with the same `du -sb` command, then run:
 
 ```sh
-export CAPACITY_MODE=ISOLATED_1M
-export CAPACITY_BASE_URL=http://backend:8080
-export CAPACITY_DURATION_SECONDS=180
-export CAPACITY_CONCURRENCY=32
-export CAPACITY_TARGET_QPS=100
-export CAPACITY_MANTICORE_BYTES=<measured isolated Manticore bytes>
-export CAPACITY_SEARCH_QUERIES=/app/deploy/capacity/search.txt
-export CAPACITY_GEO_URLS=/app/deploy/capacity/geo.txt
-export CAPACITY_ADDRESS_URLS=/app/deploy/capacity/address.txt
-./app capacityctl benchmark isolated-1m
+docker compose -p poisk-capacity-1m --env-file .env.capacity run --rm \
+  -e CAPACITY_MODE=ISOLATED_1M \
+  -e CAPACITY_BASE_URL=http://backend:8080 \
+  -e CAPACITY_DURATION_SECONDS=180 \
+  -e CAPACITY_CONCURRENCY=32 \
+  -e CAPACITY_TARGET_QPS=100 \
+  -e CAPACITY_MANTICORE_BYTES=<measured isolated Manticore bytes> \
+  -e CAPACITY_SEARCH_QUERIES=/app/deploy/capacity/search.txt \
+  -e CAPACITY_GEO_URLS=/app/deploy/capacity/geo.txt \
+  -e CAPACITY_ADDRESS_URLS=/app/deploy/capacity/address.txt \
+  backend capacityctl benchmark isolated-1m
 ```
 
 If the isolated corpus has fewer than one million indexed documents, the command fails instead of labeling the run `ISOLATED_1M`.
@@ -105,7 +102,7 @@ If the isolated corpus has fewer than one million indexed documents, the command
 ## Compare immutable snapshots
 
 ```sh
-./app capacityctl status 20
+docker compose run --rm backend capacityctl status 20
 ```
 
 Compare measured values, not only projections. In particular compare Search P95/P99, error rate, QPS, CPU/RAM, disk, outbox backlog and throughput.
@@ -122,7 +119,7 @@ Allowed ADR choices are exactly:
 Example:
 
 ```sh
-./app capacityctl adr 12 STAY_SINGLE_NODE operator "Measured 1M workload stays inside latency, error, memory and disk budgets; no additional infrastructure is justified yet."
+docker compose run --rm backend capacityctl adr 12 STAY_SINGLE_NODE operator "Measured 1M workload stays inside latency, error, memory and disk budgets; no additional infrastructure is justified yet."
 ```
 
 This stores one immutable ADR decision for the snapshot and prints Markdown describing the measured evidence. The benchmark classifier never deploys or changes architecture automatically.
