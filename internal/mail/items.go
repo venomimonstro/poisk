@@ -32,7 +32,15 @@ WHERE i.mail_item_id=$1 AND i.mailbox_id=$2`,itemID,box.ID).Scan(&x.ItemID,&x.Fo
 }
 
 func (r Repository) messageRecipients(ctx context.Context,messageID,viewerMailboxID int64)([]Recipient,error){
-	rows,err:=r.DB.Query(ctx,`SELECT mb.address,r.recipient_type FROM mail_recipients r JOIN mailboxes mb ON mb.mailbox_id=r.recipient_mailbox_id WHERE r.message_id=$1 AND (r.recipient_type<>'BCC' OR r.recipient_mailbox_id=$2 OR EXISTS(SELECT 1 FROM mail_messages m WHERE m.message_id=$1 AND m.sender_mailbox_id=$2)) ORDER BY r.recipient_type,r.ordinal`,messageID,viewerMailboxID);if err!=nil{return nil,err};defer rows.Close();out:=[]Recipient{};for rows.Next(){var x Recipient;if err:=rows.Scan(&x.Address,&x.Type);err!=nil{return nil,err};out=append(out,x)};return out,rows.Err()
+	rows,err:=r.DB.Query(ctx,`SELECT address,recipient_type,ordinal FROM (
+ SELECT r.delivery_address AS address,r.recipient_type,r.ordinal
+ FROM mail_recipients r
+ WHERE r.message_id=$1 AND (r.recipient_type<>'BCC' OR r.recipient_mailbox_id=$2 OR EXISTS(SELECT 1 FROM mail_messages m WHERE m.message_id=$1 AND m.sender_mailbox_id=$2))
+ UNION ALL
+ SELECT e.address,e.recipient_type,e.ordinal
+ FROM mail_external_recipients e
+ WHERE e.message_id=$1 AND (e.recipient_type<>'BCC' OR EXISTS(SELECT 1 FROM mail_messages m WHERE m.message_id=$1 AND m.sender_mailbox_id=$2))
+) recipients ORDER BY recipient_type,ordinal,address`,messageID,viewerMailboxID);if err!=nil{return nil,err};defer rows.Close();out:=[]Recipient{};for rows.Next(){var x Recipient;var ordinal int;if err:=rows.Scan(&x.Address,&x.Type,&ordinal);err!=nil{return nil,err};out=append(out,x)};return out,rows.Err()
 }
 
 func (r Repository) SetRead(ctx context.Context,userID,itemID int64,read bool)error{
@@ -55,7 +63,7 @@ func (r Repository) Restore(ctx context.Context,userID,itemID int64)error{
 
 func (r Repository) MoveSpam(ctx context.Context,userID,itemID int64,spam bool)error{
 	if r.DB==nil||userID<=0||itemID<=0{return ErrInvalid};box,err:=r.EnsureMailbox(ctx,userID);if err!=nil{return err};tx,err:=r.DB.Begin(ctx);if err!=nil{return err};defer func(){_=tx.Rollback(ctx)}();var role,current string;var messageID int64
-	err=tx.QueryRow(ctx,`SELECT i.item_role,f.kind,i.message_id FROM mail_items i JOIN mail_folders f ON f.folder_id=i.folder_id WHERE i.mail_item_id=$1 AND i.mailbox_id=$2 FOR UPDATE OF i`,itemID,box.ID).Scan(&role,&current,&messageID);if errors.Is(err,pgx.ErrNoRows){return ErrNotFound};if err!=nil{return err};if role!="DELIVERY"{return ErrForbidden};target:="SPAM";event:="SPAM";if !spam{target="INBOX";event="UNSPAM"};if current==target{return tx.Commit(ctx)};if spam&&current!="INBOX"{return ErrConflict};if !spam&&current!="SPAM"{return ErrConflict};targetID,err:=folderID(ctx,tx,box.ID,target);if err!=nil{return err};if _,err=tx.Exec(ctx,`UPDATE mail_items SET folder_id=$3,updated_at=now() WHERE mail_item_id=$1 AND mailbox_id=$2`,itemID,box.ID,targetID);err!=nil{return err};if _,err=tx.Exec(ctx,`INSERT INTO mail_events(mailbox_id,message_id,event_type) VALUES($1,$2,$3)`,box.ID,messageID,event);err!=nil{return err};return tx.Commit(ctx)
+	err=tx.QueryRow(ctx,`SELECT i.item_role,f.kind,i.message_id FROM mail_items i JOIN mail_folders f ON f.folder_id=i.folder_id WHERE i.mail_item_id=$1 AND i.mailbox_id=$2 FOR UPDATE OF i`,itemID,box.ID).Scan(&role,&current,&messageID);if errors.Is(err,pgx.ErrNoRows){return ErrNotFound};if err!=nil{return err};if role!="DELIVERY"{return ErrForbidden};target:="SPAM";event:="SPAM";if !spam{target="INBOX";event="UNSPAM"};if current==target{return tx.Commit(ctx)};if spam&&current!="INBOX"{return ErrConflict};if !spam&&current!="SPAM"{return ErrConflict};targetID,err:=folderID(ctx,tx,box.ID,target);if err!=nil{return err};if _,err=tx.Exec(ctx,`UPDATE mail_items SET folder_id=$3,updated_at=now() WHERE mail_item_id=$1 AND mailbox_id=$2`,itemID,box.ID,targetID);err!=nil{return err};if _,err=tx.Exec(ctx,`INSERT INTO mail_events(mailbox_id,message_id,event_type) VALUES($1,$2,$3)`,box.ID,messageID,event);if err!=nil{return err};return tx.Commit(ctx)
 }
 
 func (r Repository) Search(ctx context.Context,userID int64,query string,limit int)([]Item,error){
