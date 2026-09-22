@@ -10,6 +10,7 @@ Sprint 21 measures the existing architecture. It does **not** authorize an infra
 4. `CAPACITY_MANTICORE_BYTES` must be measured from the Manticore data volume. Do not enter a guessed value.
 5. `projection_10m.kind=PROJECTED_LINEAR_STORAGE_ONLY` is a projection, not a measured 10M result.
 6. Architecture changes require a separately recorded human ADR decision.
+7. The one-off benchmark container's cgroup is **not** treated as backend/Manticore CPU/RAM. Server resource bottlenecks require a separate measurement for the same benchmark window.
 
 ## Workload files
 
@@ -18,6 +19,7 @@ Reference workloads are versioned in:
 - `deploy/capacity/search.txt`
 - `deploy/capacity/geo.txt`
 - `deploy/capacity/address.txt`
+- `deploy/capacity/server-metrics.example.json`
 
 They are copied into the backend runtime image under `/app/deploy/capacity/`. Replace/add cases only with valid bounded production routes. Do not add authentication secrets or user-specific data to these files.
 
@@ -31,12 +33,31 @@ docker compose exec -T manticore sh -c "du -sb /var/lib/manticore | awk '{print 
 
 Record that integer as `CAPACITY_MANTICORE_BYTES` for the benchmark run.
 
+## Server resource measurement
+
+CPU/RAM of the short-lived `capacityctl` container are recorded only as benchmark-generator diagnostics. They are not used to classify server pressure.
+
+For CPU/RAM/disk bottleneck classification, create a JSON file from the monitoring system or host-level sampling covering the same benchmark window:
+
+```json
+{
+  "cpu_percent": 68.4,
+  "ram_percent": 73.2,
+  "disk_percent": 61.0,
+  "disk_available_bytes": 412316860416,
+  "source": "host monitoring average/max for backend+postgres+manticore during benchmark window"
+}
+```
+
+Percentages are normalized to 0–100 for the allocated search host/capacity under test. Mount this file read-only and set `CAPACITY_SERVER_METRICS_FILE`. If it is omitted, the snapshot explicitly states that server CPU/RAM/disk values were not provided, and those signals are not used for bottleneck classification.
+
 ## Current-corpus read-only benchmark
 
 The backend image is distroless, so use `docker compose run` instead of trying to open a shell in it.
 
 ```sh
 docker compose run --rm \
+  -v "$PWD/server-metrics.json:/capacity/server-metrics.json:ro" \
   -e CAPACITY_MODE=LIVE_READONLY \
   -e CAPACITY_BASE_URL=http://backend:8080 \
   -e CAPACITY_DURATION_SECONDS=60 \
@@ -46,7 +67,7 @@ docker compose run --rm \
   -e CAPACITY_SEARCH_QUERIES=/app/deploy/capacity/search.txt \
   -e CAPACITY_GEO_URLS=/app/deploy/capacity/geo.txt \
   -e CAPACITY_ADDRESS_URLS=/app/deploy/capacity/address.txt \
-  -e CAPACITY_DISK_PATH=/ \
+  -e CAPACITY_SERVER_METRICS_FILE=/capacity/server-metrics.json \
   backend capacityctl benchmark current-baseline
 ```
 
@@ -56,8 +77,9 @@ The immutable snapshot records:
 - indexed document count and canonical corpus counts;
 - PostgreSQL size and measured Manticore size;
 - crawl/outbox backlog;
-- crawl/index/Data Hub last-hour throughput;
-- cgroup CPU/RAM and filesystem disk pressure when available;
+- crawl/extraction/index/Data Hub last-hour throughput;
+- explicit server resource measurements when provided;
+- benchmark-client cgroup diagnostics separately;
 - explicit linear storage projection to 10M documents;
 - classified bottlenecks.
 
@@ -81,10 +103,11 @@ Apply migrations in that isolated project. Populate the corpus using the same ca
 
 Before benchmarking, verify the isolated database reports at least **1,000,000** rows where `urls.index_status='INDEXED'`. `capacityctl` also checks this and refuses `ISOLATED_1M` below that threshold.
 
-Measure the isolated Manticore volume with the same `du -sb` command, then run:
+Measure isolated Manticore bytes and create server metrics for the isolated benchmark window, then run:
 
 ```sh
 docker compose -p poisk-capacity-1m --env-file .env.capacity run --rm \
+  -v "$PWD/server-metrics.json:/capacity/server-metrics.json:ro" \
   -e CAPACITY_MODE=ISOLATED_1M \
   -e CAPACITY_BASE_URL=http://backend:8080 \
   -e CAPACITY_DURATION_SECONDS=180 \
@@ -94,6 +117,7 @@ docker compose -p poisk-capacity-1m --env-file .env.capacity run --rm \
   -e CAPACITY_SEARCH_QUERIES=/app/deploy/capacity/search.txt \
   -e CAPACITY_GEO_URLS=/app/deploy/capacity/geo.txt \
   -e CAPACITY_ADDRESS_URLS=/app/deploy/capacity/address.txt \
+  -e CAPACITY_SERVER_METRICS_FILE=/capacity/server-metrics.json \
   backend capacityctl benchmark isolated-1m
 ```
 
@@ -105,7 +129,7 @@ If the isolated corpus has fewer than one million indexed documents, the command
 docker compose run --rm backend capacityctl status 20
 ```
 
-Compare measured values, not only projections. In particular compare Search P95/P99, error rate, QPS, CPU/RAM, disk, outbox backlog and throughput.
+Compare measured values, not only projections. In particular compare Search P95/P99, error rate, QPS, CPU/RAM, disk, crawl/extract/index throughput and queue backlogs.
 
 ## Architecture decision
 
