@@ -99,10 +99,12 @@ func run() error {
 		return runAdminCtl(ctx, pool, os.Args[2:])
 	case "releasectl":
 		return runReleaseCtl(ctx, pool, os.Args[2:])
+	case "recoveryctl":
+		return runRecoveryCtl(ctx, pool, os.Args[2:])
 	case "billingctl":
 		return runBillingCtl(ctx, pool, os.Args[2:])
 	case "quality":
-		return runQuality(cfg)
+		return runQualityWithHistory(cfg,pool)
 	default:
 		return fmt.Errorf("runtime mode %q is not implemented in current sprint", mode)
 	}
