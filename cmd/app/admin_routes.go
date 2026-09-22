@@ -17,11 +17,11 @@ func registerAdminRoutes(router chi.Router,apiGuard guard.Middleware,pool *pgxpo
 	service,err:=newAdminService(pool)
 	if err!=nil{
 		slog.Warn("admin API disabled; fail-closed", "reason", err.Error())
-		handler:=adminhttp.Handler{Service:nil,Ops:nil,SecureCookies:secureCookies}
+		handler:=adminhttp.Handler{Service:nil,Ops:nil,Owner:nil,SecureCookies:secureCookies}
 		router.Mount("/api/admin",apiGuard.Protect(handler.Routes()))
 		return nil
 	}
-	handler:=adminhttp.Handler{Service:service,Ops:admin.OpsRepository{DB:pool},SecureCookies:secureCookies}
+	handler:=adminhttp.Handler{Service:service,Ops:admin.OpsRepository{DB:pool},Owner:admin.OwnerRepository{DB:pool},SecureCookies:secureCookies}
 	router.Mount("/api/admin",apiGuard.Protect(handler.Routes()))
 	return nil
 }
