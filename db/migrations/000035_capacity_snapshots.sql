@@ -8,7 +8,7 @@ CREATE TABLE capacity_benchmark_runs (
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at TIMESTAMPTZ,
     last_error TEXT,
-    CHECK ((status='RUNNING' AND completed_at IS NULL) OR status='RUNNING' OR completed_at IS NOT NULL)
+    CHECK ((status='RUNNING' AND completed_at IS NULL) OR (status<>'RUNNING' AND completed_at IS NOT NULL))
 );
 
 CREATE TABLE capacity_snapshots (
