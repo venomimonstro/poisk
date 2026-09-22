@@ -98,6 +98,7 @@ export default function HomePage() {
         </form>
         <nav className="productLinks" aria-label="Разделы поиска">
           <a href="/map">Карта</a>
+          <a href="/data">Данные</a>
         </nav>
       </section>
       {error && <div className="searchState searchError" role="alert">{error}</div>}
