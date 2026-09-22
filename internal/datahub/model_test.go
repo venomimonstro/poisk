@@ -30,3 +30,17 @@ func TestCityRequiresMoreEvidence(t *testing.T){
 	gate:=Evaluate(PageCity,Evidence{Organizations:9,WithWebsite:7,WithAddress:8,AverageQuality:80,DistinctSources:5})
 	if gate.Publish{t.Fatalf("city should remain draft: %+v",gate)}
 }
+
+func TestOrganizationRequiresCanonicalIdentityEvidence(t *testing.T){
+	thin:=Evaluate(PageOrganization,Evidence{Organizations:1,AverageQuality:90,DistinctSources:1})
+	if thin.Publish||thin.Reason!="insufficient_identity_evidence"{t.Fatalf("thin=%+v",thin)}
+	ok:=Evaluate(PageOrganization,Evidence{Organizations:1,WithAddress:1,AverageQuality:80,DistinctSources:1})
+	if !ok.Publish{t.Fatalf("organization should publish: %+v",ok)}
+}
+
+func TestWebsiteRequiresLinkedOrganization(t *testing.T){
+	thin:=Evaluate(PageWebsite,Evidence{Organizations:0,WithWebsite:1,AverageQuality:90,DistinctSources:2})
+	if thin.Publish||thin.Reason!="no_linked_organizations"{t.Fatalf("thin=%+v",thin)}
+	ok:=Evaluate(PageWebsite,Evidence{Organizations:1,WithWebsite:1,AverageQuality:70,DistinctSources:1})
+	if !ok.Publish{t.Fatalf("website should publish: %+v",ok)}
+}
