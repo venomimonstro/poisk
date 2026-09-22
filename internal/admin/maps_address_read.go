@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type MapVersionSummary struct {
@@ -42,7 +44,7 @@ func (s Service) MapState(ctx context.Context,session Session)(MapStateSummary,e
 	if s.Store==nil||s.Store.db==nil{return MapStateSummary{},errors.New("admin service is not initialized")};if err:=s.RequireRole(session,"OPERATOR","ANALYST","VIEWER","SUPPORT");err!=nil{return MapStateSummary{},err}
 	var activeID,previousID *string;var out MapStateSummary
 	if err:=s.Store.db.QueryRow(ctx,`SELECT active_version,previous_version,activated_at,updated_at FROM map_state WHERE singleton=TRUE`).Scan(&activeID,&previousID,&out.ActivatedAt,&out.UpdatedAt);err!=nil{return MapStateSummary{},err}
-	load:=func(id *string)(*MapVersionSummary,error){if id==nil{return nil,nil};var v MapVersionSummary;err:=s.Store.db.QueryRow(ctx,`SELECT map_version,status,pmtiles_size,pmtiles_sha256,style_sha256,min_zoom,max_zoom,created_at FROM map_versions WHERE map_version=$1`,*id).Scan(&v.Version,&v.Status,&v.PMTilesSize,&v.PMTilesSHA256,&v.StyleSHA256,&v.MinZoom,&v.MaxZoom,&v.CreatedAt);return &v,err}
+	load:=func(id *string)(*MapVersionSummary,error){if id==nil{return nil,nil};var v MapVersionSummary;err:=s.Store.db.QueryRow(ctx,`SELECT map_version,status,pmtiles_size,pmtiles_sha256,style_sha256,min_zoom,max_zoom,created_at FROM map_versions WHERE map_version=$1`,*id).Scan(&v.Version,&v.Status,&v.PMTilesSize,&v.PMTilesSHA256,&v.StyleSHA256,&v.MinZoom,&v.MaxZoom,&v.CreatedAt);if errors.Is(err,pgx.ErrNoRows){return nil,nil};if err!=nil{return nil,err};return &v,nil}
 	var err error;if out.Active,err=load(activeID);err!=nil{return MapStateSummary{},err};if out.Previous,err=load(previousID);err!=nil{return MapStateSummary{},err};return out,nil
 }
 
@@ -50,8 +52,10 @@ func (s Service) AddressData(ctx context.Context,session Session)(AddressDataSum
 	if s.Store==nil||s.Store.db==nil{return AddressDataSummary{},errors.New("admin service is not initialized")};if err:=s.RequireRole(session,"OPERATOR","ANALYST","VIEWER","SUPPORT");err!=nil{return AddressDataSummary{},err}
 	var out AddressDataSummary
 	if err:=s.Store.db.QueryRow(ctx,`SELECT count(*) FILTER(WHERE status='ACTIVE'),count(*) FILTER(WHERE status='INACTIVE') FROM addresses`).Scan(&out.ActiveAddresses,&out.InactiveAddresses);err!=nil{return AddressDataSummary{},err}
-	_ = s.Store.db.QueryRow(ctx,`SELECT count(*) FROM addresses WHERE status='ACTIVE' AND parent_address_id IS NULL AND level IS NOT NULL AND level>1`).Scan(&out.OrphanAddresses)
-	_ = s.Store.db.QueryRow(ctx,`SELECT count(*) FROM address_staging_rows WHERE state='IGNORED'`).Scan(&out.IgnoredAddresses)
-	var id int64;var updated time.Time;err:=s.Store.db.QueryRow(ctx,`SELECT batch_id,source_revision,status,staged_count,rejected_count,applied_count,updated_at FROM address_import_batches ORDER BY updated_at DESC,batch_id DESC LIMIT 1`).Scan(&id,&out.LatestRevision,&out.LatestBatchStatus,&out.StagedCount,&out.RejectedCount,&out.AppliedCount,&updated);if err==nil{out.LatestBatchID=&id;out.UpdatedAt=&updated}
+	if err:=s.Store.db.QueryRow(ctx,`SELECT count(*) FROM addresses WHERE status='ACTIVE' AND parent_address_id IS NULL AND level IS NOT NULL AND level>1`).Scan(&out.OrphanAddresses);err!=nil{return AddressDataSummary{},err}
+	if err:=s.Store.db.QueryRow(ctx,`SELECT count(*) FROM address_staging_rows WHERE state='IGNORED'`).Scan(&out.IgnoredAddresses);err!=nil{return AddressDataSummary{},err}
+	var id int64;var updated time.Time
+	err:=s.Store.db.QueryRow(ctx,`SELECT batch_id,source_revision,status,staged_count,rejected_count,applied_count,updated_at FROM address_import_batches ORDER BY updated_at DESC,batch_id DESC LIMIT 1`).Scan(&id,&out.LatestRevision,&out.LatestBatchStatus,&out.StagedCount,&out.RejectedCount,&out.AppliedCount,&updated)
+	if errors.Is(err,pgx.ErrNoRows){return out,nil};if err!=nil{return AddressDataSummary{},err};out.LatestBatchID=&id;out.UpdatedAt=&updated
 	return out,nil
 }
