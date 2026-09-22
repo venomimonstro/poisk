@@ -79,6 +79,8 @@ func run() error {
 		return runResourceMonitor(pool)
 	case "demand-worker":
 		return runDemandWorker(pool)
+	case "demandctl":
+		return runDemandCtl(ctx, pool, os.Args[2:])
 	case "mapctl":
 		return runMapCtl(ctx, pool, os.Args[2:])
 	case "orgctl":
