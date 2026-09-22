@@ -15,7 +15,6 @@ import (
 )
 
 type Handler struct{Repo reviews.Repository;Identity *identity.Service}
-
 type authed struct{User identity.User;Session identity.Session}
 
 func (h Handler) Routes()http.Handler{
@@ -24,6 +23,7 @@ func (h Handler) Routes()http.Handler{
 	r.Get("/places/{placeID}/rating",h.Rating)
 	r.Group(func(p chi.Router){
 		p.Use(h.requireAuth)
+		p.Get("/places/{placeID}/permissions",h.Permissions)
 		p.With(h.requireCSRF).Put("/places/{placeID}/review",h.Upsert)
 		p.With(h.requireCSRF).Delete("/reviews/{reviewID}",h.Delete)
 		p.With(h.requireCSRF).Post("/reviews/{reviewID}/report",h.Report)
@@ -38,12 +38,13 @@ func writeJSON(w http.ResponseWriter,status int,v any){w.Header().Set("Content-T
 func writeError(w http.ResponseWriter,status int,code string){writeJSON(w,status,map[string]string{"error":code})}
 
 func (h Handler) requireAuth(next http.Handler)http.Handler{return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-	if h.Identity==nil{writeError(w,503,"account_unavailable");return};cookie,err:=r.Cookie(identityhttp.SessionCookieName);if err!=nil||cookie.Value==""{writeError(w,401,"unauthorized");return};u,s,err:=h.Identity.Authenticate(r.Context(),cookie.Value);if err!=nil{writeError(w,401,"unauthorized");return};ctx:=r.Context();ctx=withAuth(ctx,authed{User:u,Session:s});next.ServeHTTP(w,r.WithContext(ctx))
+	if h.Identity==nil{writeError(w,503,"account_unavailable");return};cookie,err:=r.Cookie(identityhttp.SessionCookieName);if err!=nil||cookie.Value==""{writeError(w,401,"unauthorized");return};u,s,err:=h.Identity.Authenticate(r.Context(),cookie.Value);if err!=nil{writeError(w,401,"unauthorized");return};next.ServeHTTP(w,r.WithContext(withAuth(r.Context(),authed{User:u,Session:s})))
 })}
 func (h Handler) requireCSRF(next http.Handler)http.Handler{return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){a,ok:=authFrom(r);if !ok||!identity.VerifyCSRF(a.Session,r.Header.Get("X-CSRF-Token")){writeError(w,403,"csrf_failed");return};next.ServeHTTP(w,r)})}
 
 func (h Handler) List(w http.ResponseWriter,r *http.Request){placeID,err:=parseID(chi.URLParam(r,"placeID"));if err!=nil{writeError(w,400,"invalid_place_id");return};limit:=20;if raw:=r.URL.Query().Get("limit");raw!=""{v,e:=strconv.Atoi(raw);if e!=nil||v<1||v>100{writeError(w,400,"invalid_limit");return};limit=v};var before int64;if raw:=r.URL.Query().Get("before_id");raw!=""{before,err=strconv.ParseInt(raw,10,64);if err!=nil||before<=0{writeError(w,400,"invalid_cursor");return}};items,err:=h.Repo.ListPublic(r.Context(),placeID,limit,before);if err!=nil{writeRepoError(w,err);return};writeJSON(w,200,map[string]any{"reviews":items})}
 func (h Handler) Rating(w http.ResponseWriter,r *http.Request){placeID,err:=parseID(chi.URLParam(r,"placeID"));if err!=nil{writeError(w,400,"invalid_place_id");return};stats,err:=h.Repo.Stats(r.Context(),placeID);if err!=nil{writeRepoError(w,err);return};writeJSON(w,200,stats)}
+func (h Handler) Permissions(w http.ResponseWriter,r *http.Request){a,ok:=authFrom(r);if !ok{writeError(w,401,"unauthorized");return};placeID,err:=parseID(chi.URLParam(r,"placeID"));if err!=nil{writeError(w,400,"invalid_place_id");return};permissions,err:=h.Repo.Permissions(r.Context(),a.User.ID,placeID);if err!=nil{writeRepoError(w,err);return};writeJSON(w,200,permissions)}
 
 func (h Handler) Upsert(w http.ResponseWriter,r *http.Request){a,ok:=authFrom(r);if !ok{writeError(w,401,"unauthorized");return};placeID,err:=parseID(chi.URLParam(r,"placeID"));if err!=nil{writeError(w,400,"invalid_place_id");return};var in struct{Rating int `json:"rating"`;Body string `json:"body"`};if err:=decode(w,r,&in);err!=nil{writeError(w,400,"invalid_json");return};if err:=h.Repo.ConsumeAction(r.Context(),a.User.ID,"WRITE",time.Now().UTC());err!=nil{writeRepoError(w,err);return};item,err:=h.Repo.Upsert(r.Context(),a.User.ID,placeID,in.Rating,in.Body);if err!=nil{writeRepoError(w,err);return};writeJSON(w,200,item)}
 func (h Handler) Delete(w http.ResponseWriter,r *http.Request){a,ok:=authFrom(r);if !ok{writeError(w,401,"unauthorized");return};reviewID,err:=parseID(chi.URLParam(r,"reviewID"));if err!=nil{writeError(w,400,"invalid_review_id");return};if err:=h.Repo.ConsumeAction(r.Context(),a.User.ID,"WRITE",time.Now().UTC());err!=nil{writeRepoError(w,err);return};if err:=h.Repo.SoftDelete(r.Context(),a.User.ID,reviewID);err!=nil{writeRepoError(w,err);return};w.WriteHeader(204)}
