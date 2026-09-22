@@ -88,3 +88,26 @@ func TestOrganizationReviewPreviewApplyIsSingleUseAndAudited(t *testing.T){
 	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM audit_log WHERE actor_type='ADMIN' AND action='ORG_REVIEW_APPLY' AND entity_type='ORG_REVIEW' AND entity_id=$1::bigint::text`,reviewID).Scan(&auditCount);err!=nil{t.Fatal(err)}
 	if action!="UPDATE"||target==nil||*target!=placeID||eventCount!=1||auditCount!=1{t.Fatalf("action=%s target=%v events=%d audit=%d",action,target,eventCount,auditCount)}
 }
+
+func TestReviewModerationPreviewApplyIsSingleUseSessionBoundAndAudited(t *testing.T){
+	pool:=adminIntegrationDB(t);repo,adminUser,session,_:=createIntegrationAdmin(t,pool,"review-mod");ctx:=context.Background();service:=Service{Store:repo}
+	var author,reporter int64
+	if err:=pool.QueryRow(ctx,`INSERT INTO consumer_users(email,password_hash,email_verified_at) VALUES($1,'integration-hash',now()) RETURNING user_id`,fmt.Sprintf("review-author-%d@example.test",time.Now().UnixNano())).Scan(&author);err!=nil{t.Fatal(err)}
+	if err:=pool.QueryRow(ctx,`INSERT INTO consumer_users(email,password_hash,email_verified_at) VALUES($1,'integration-hash',now()) RETURNING user_id`,fmt.Sprintf("review-reporter-%d@example.test",time.Now().UnixNano())).Scan(&reporter);err!=nil{t.Fatal(err)}
+	var placeID int64;if err:=pool.QueryRow(ctx,`INSERT INTO organizations(name,normalized_name,status,quality_score,source_count) VALUES('Review Moderation Org','review moderation org','ACTIVE',80,1) RETURNING place_id`).Scan(&placeID);err!=nil{t.Fatal(err)}
+	var reviewID int64;if err:=pool.QueryRow(ctx,`INSERT INTO organization_reviews(place_id,consumer_user_id,rating,body,status,change_actor_type,change_actor_id,change_reason) VALUES($1,$2,5,'Reported review for moderation integration test.','VISIBLE','USER',$2,'USER_CREATE') RETURNING review_id`,placeID,author).Scan(&reviewID);err!=nil{t.Fatal(err)}
+	if _,err:=pool.Exec(ctx,`INSERT INTO organization_review_reports(review_id,reporter_user_id,reason,details) VALUES($1,$2,'SPAM','integration report')`,reviewID,reporter);err!=nil{t.Fatal(err)}
+	t.Cleanup(func(){_,_=pool.Exec(context.Background(),`DELETE FROM organizations WHERE place_id=$1`,placeID);_,_=pool.Exec(context.Background(),`DELETE FROM consumer_users WHERE user_id IN ($1,$2)`,author,reporter)})
+	preview,err:=service.PreviewReviewModeration(ctx,session,reviewID,"HIDE","confirmed report");if err!=nil{t.Fatal(err)}
+	otherHash:=bytes.Repeat([]byte{66},32);otherCSRF:=bytes.Repeat([]byte{65},32);other,err:=repo.CreateSession(ctx,adminUser.ID,otherHash,otherCSRF,nil,time.Hour);if err!=nil{t.Fatal(err)};other.Role="OPERATOR"
+	if _,err:=service.ApplyReviewModeration(ctx,other,preview.Token);!errors.Is(err,ErrPreviewInvalid){t.Fatalf("foreign session used review preview: %v",err)}
+	result,err:=service.ApplyReviewModeration(ctx,session,preview.Token);if err!=nil{t.Fatal(err)};if result.Status!="HIDDEN"||result.OpenReports!=0{t.Fatalf("result=%+v",result)}
+	if _,err:=service.ApplyReviewModeration(ctx,session,preview.Token);!errors.Is(err,ErrPreviewInvalid){t.Fatalf("review preview reused: %v",err)}
+	var statsCount int64;var revisions,events,audits,resolvedReports int
+	if err:=pool.QueryRow(ctx,`SELECT review_count FROM organization_review_stats WHERE place_id=$1`,placeID).Scan(&statsCount);err!=nil{t.Fatal(err)}
+	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM organization_review_revisions WHERE review_id=$1`,reviewID).Scan(&revisions);err!=nil{t.Fatal(err)}
+	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM organization_review_moderation_events WHERE review_id=$1`,reviewID).Scan(&events);err!=nil{t.Fatal(err)}
+	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM audit_log WHERE actor_type='ADMIN' AND action='REVIEW_MODERATION_APPLY' AND entity_type='ORGANIZATION_REVIEW' AND entity_id=$1::bigint::text`,reviewID).Scan(&audits);err!=nil{t.Fatal(err)}
+	if err:=pool.QueryRow(ctx,`SELECT count(*) FROM organization_review_reports WHERE review_id=$1 AND status='RESOLVED'`,reviewID).Scan(&resolvedReports);err!=nil{t.Fatal(err)}
+	if statsCount!=0||revisions!=2||events!=2||audits!=1||resolvedReports!=1{t.Fatalf("stats=%d revisions=%d events=%d audits=%d resolved=%d",statsCount,revisions,events,audits,resolvedReports)}
+}
