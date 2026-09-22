@@ -14,6 +14,7 @@ function allowed(path:string[],method:string){
   if(path.length===2&&path[0]==="drafts"&&/^\d+$/.test(path[1]))return method==="PUT";
   if(path.length===3&&path[0]==="drafts"&&/^\d+$/.test(path[1])&&path[2]==="send")return method==="POST";
   if(path.length===3&&path[0]==="drafts"&&/^\d+$/.test(path[1])&&path[2]==="attachments")return method==="POST";
+  if(path.length===4&&path[0]==="drafts"&&/^\d+$/.test(path[1])&&path[2]==="attachments"&&/^\d+$/.test(path[3]))return method==="DELETE";
   if(path.length===3&&path[0]==="items"&&/^\d+$/.test(path[1])&&itemActions.has(path[2]))return method==="POST";
   return false;
 }
@@ -25,7 +26,7 @@ async function proxy(request:NextRequest,path:string[]){
     const headers=new Headers({Accept:request.headers.get("accept")||"application/json"});
     for(const name of ["cookie","x-csrf-token","content-type"]){const value=request.headers.get(name);if(value)headers.set(name,value)}
     let body:BodyInit|undefined;
-    if(!["GET","HEAD"].includes(request.method)){
+    if(!["GET","HEAD","DELETE"].includes(request.method)){
       const type=request.headers.get("content-type")||"";
       body=type.toLowerCase().startsWith("multipart/form-data")?await request.arrayBuffer():await request.text();
     }
@@ -39,3 +40,4 @@ async function proxy(request:NextRequest,path:string[]){
 export async function GET(request:NextRequest,context:{params:Promise<{path:string[]}>}){return proxy(request,(await context.params).path||[])}
 export async function POST(request:NextRequest,context:{params:Promise<{path:string[]}>}){return proxy(request,(await context.params).path||[])}
 export async function PUT(request:NextRequest,context:{params:Promise<{path:string[]}>}){return proxy(request,(await context.params).path||[])}
+export async function DELETE(request:NextRequest,context:{params:Promise<{path:string[]}>}){return proxy(request,(await context.params).path||[])}
