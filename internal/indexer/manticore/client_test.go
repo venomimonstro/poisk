@@ -18,6 +18,22 @@ func TestQuoteEscapesSQLLiteral(t *testing.T) {
 	if got != want { t.Fatalf("quote=%q want=%q", got, want) }
 }
 
+func TestCountDocumentsParsesBoundedResult(t *testing.T) {
+	var query string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		query = string(body)
+		_, _ = io.WriteString(w, "[{\"data\":[{\"count\":123}],\"total\":1,\"error\":\"\",\"warning\":\"\"}]")
+	}))
+	defer srv.Close()
+	c, err := New(Config{BaseURL: srv.URL})
+	if err != nil { t.Fatal(err) }
+	count, err := c.CountDocuments(context.Background())
+	if err != nil { t.Fatal(err) }
+	if count != 123 { t.Fatalf("count=%d", count) }
+	if query != "SELECT COUNT(*) AS count FROM web_documents" { t.Fatalf("query=%q", query) }
+}
+
 func TestCurrentVersionParsesRawResultSet(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "[{\"columns\":[{\"entity_version\":{\"type\":\"long long\"}}],\"data\":[{\"entity_version\":7}],\"total\":1,\"error\":\"\",\"warning\":\"\"}]")
