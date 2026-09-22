@@ -61,14 +61,14 @@ func (h Handler) Search(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if h.Impressions != nil && len(resp.Results) > 0 {
-		hosts := make([]string, 0, len(resp.Results))
-		for _, result := range resp.Results { if result.Host != "" { hosts = append(hosts, result.Host) } }
+	hosts := make([]string,0,len(resp.Results))
+	for _, result := range resp.Results { if result.Host != "" { hosts = append(hosts, result.Host) } }
+	if h.Impressions != nil && len(hosts) > 0 {
 		_ = h.Impressions.RecordSearchImpressions(r.Context(), hosts)
 	}
 	if h.Demand!=nil{
 		ctx,cancel:=context.WithTimeout(r.Context(),50*time.Millisecond)
-		_,_ = h.Demand.Record(ctx,demand.Snapshot{Normalized:resp.Normalized,Total:resp.Total,AverageQuality:resp.Coverage.AverageQuality,AverageFreshness:resp.Coverage.AverageFreshness,AverageSpam:resp.Coverage.AverageSpam},time.Now().UTC())
+		_,_ = h.Demand.Record(ctx,demand.Snapshot{Normalized:resp.Normalized,Total:resp.Total,AverageQuality:resp.Coverage.AverageQuality,AverageFreshness:resp.Coverage.AverageFreshness,AverageSpam:resp.Coverage.AverageSpam,Hosts:hosts},time.Now().UTC())
 		cancel()
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
