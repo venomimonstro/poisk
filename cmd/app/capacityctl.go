@@ -79,8 +79,7 @@ func runCapacityBenchmark(ctx context.Context,repo *capacity.Repository,label st
 	signals:=capacity.Signals{Search:search,GEO:geo,Address:address,CrawlReady:dbAfter.Queues.CrawlReady,OutboxReady:dbAfter.Queues.OutboxReady,CrawlPerSecond:dbAfter.Throughput.CrawlPerSecond,IndexPerSecond:dbAfter.Throughput.IndexPerSecond,TargetQPS:targetQPS,ProjectedBytes:projection.ProjectedTotalBytes,DBIndexedDocuments:dbAfter.Corpus.IndexedDocuments,ManticoreDocuments:manticoreDocuments}
 	if serverMeasured{signals.CPUPercent=serverMetrics.CPUPercent;signals.RAMPercent=serverMetrics.RAMPercent;signals.DiskPercent=serverMetrics.DiskPercent;signals.AvailableDiskBytes=serverMetrics.DiskAvailableBytes}
 	bottlenecks:=capacity.Classify(signals)
-	resourceMap:=map[string]any{"benchmark_client":clientResources,"server_measurements_provided":serverMeasured}
-	if serverMeasured{resourceMap["server"]=serverMetrics}else{resourceMap["server_warning"]="Server CPU/RAM/disk were not provided. Client-container cgroup values are retained only as benchmark-generator diagnostics and are not used for server bottleneck classification."}
+	resourceMap:=map[string]any{"benchmark_client":clientResources,"server_measurements_provided":serverMeasured,"server":serverMetrics}
 	queueMap:=map[string]any{"before":dbBefore.Queues,"after":dbAfter.Queues,"throughput":dbAfter.Throughput,"corpus":dbAfter.Corpus,"manticore_documents":manticoreDocuments,"indexed_document_delta":dbAfter.Corpus.IndexedDocuments-manticoreDocuments}
 	snapshotID,err:=repo.CompleteRun(ctx,capacity.FinalSnapshot{RunID:runID,MeasuredDocuments:dbAfter.Corpus.IndexedDocuments,MeasuredAt:time.Now().UTC(),Workload:map[string]capacity.WorkloadMetrics{"search":search,"geo":geo,"address":address},Resources:resourceMap,Queues:queueMap,Storage:storage,Projection:projection,Bottlenecks:bottlenecks});if err!=nil{return err}
 	failed=false
@@ -88,7 +87,7 @@ func runCapacityBenchmark(ctx context.Context,repo *capacity.Repository,label st
 }
 
 func loadCapacityServerMetrics(path string)(capacityServerMetrics,bool,error){
-	path=strings.TrimSpace(path);if path==""{return capacityServerMetrics{},false,nil}
+	path=strings.TrimSpace(path);if path==""{return capacityServerMetrics{},false,errors.New("CAPACITY_SERVER_METRICS_FILE is required; completed capacity snapshots must include measured server CPU/RAM/disk")}
 	raw,err:=os.ReadFile(path);if err!=nil{return capacityServerMetrics{},false,err};if len(raw)>16<<10{return capacityServerMetrics{},false,errors.New("server metrics file is too large")}
 	var m capacityServerMetrics;if err:=json.Unmarshal(raw,&m);err!=nil{return capacityServerMetrics{},false,err};m.Source=strings.TrimSpace(m.Source)
 	if m.CPUPercent<0||m.CPUPercent>100||m.RAMPercent<0||m.RAMPercent>100||m.DiskPercent<0||m.DiskPercent>100||m.DiskAvailableBytes<0||m.Source==""||len(m.Source)>256{return capacityServerMetrics{},false,errors.New("invalid server metrics file")}
