@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"mime/multipart"
+	"mime/quotedprintable"
 	stdmail "net/mail"
 	"path/filepath"
 	"strings"
@@ -73,7 +74,7 @@ func parseInboundEntity(mediaType string,params map[string]string,header stdmail
 	return nil
 }
 
-func decodeTransfer(r io.Reader,enc string)io.Reader{switch strings.ToLower(strings.TrimSpace(enc)){case "","7bit","8bit","binary":return r;case "base64":return base64.NewDecoder(base64.StdEncoding,r);default:return nil}}
+func decodeTransfer(r io.Reader,enc string)io.Reader{switch strings.ToLower(strings.TrimSpace(enc)){case "","7bit","8bit","binary":return r;case "base64":return base64.NewDecoder(base64.StdEncoding,r);case "quoted-printable":return quotedprintable.NewReader(r);default:return nil}}
 
 func singleMailboxAddress(raw string)(string,error){list,err:=stdmail.ParseAddressList(raw);if err!=nil||len(list)!=1{return "",ErrInvalid};addr:=strings.TrimSpace(list[0].Address);if len(addr)<3||len(addr)>320||strings.ContainsAny(addr,"\r\n\x00"){return "",ErrInvalid};return addr,nil}
 
