@@ -50,13 +50,16 @@ type Verification struct {
 }
 
 type URLStatus struct {
-	URLID       *int64     `json:"url_id,omitempty"`
-	URL         string     `json:"url"`
-	CrawlStatus string     `json:"crawl_status"`
-	IndexStatus string     `json:"index_status"`
-	HTTPStatus  *int16     `json:"http_status,omitempty"`
-	LastCrawlAt *time.Time `json:"last_crawl_at,omitempty"`
-	LastError   string     `json:"last_error,omitempty"`
+	URLID          *int64     `json:"url_id,omitempty"`
+	URL            string     `json:"url"`
+	CrawlStatus    string     `json:"crawl_status"`
+	IndexStatus    string     `json:"index_status"`
+	HTTPStatus     *int16     `json:"http_status,omitempty"`
+	LastCrawlAt    *time.Time `json:"last_crawl_at,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
+	CanonicalURL   string     `json:"canonical_url,omitempty"`
+	RobotsNoIndex  bool       `json:"robots_noindex"`
+	RobotsNoFollow bool       `json:"robots_nofollow"`
 }
 
 type Metrics struct {
@@ -227,11 +230,19 @@ func (r *Repository) URLStatus(ctx context.Context, userID, siteID int64, normal
 	var out URLStatus
 	err := r.db.QueryRow(ctx, `
 SELECT u.url_id,$3,COALESCE(u.crawl_status,'DISCOVERED'),COALESCE(u.index_status,'NOT_INDEXED'),u.http_status,u.last_crawl_at,
-       COALESCE((SELECT ch.error_code FROM crawl_history ch WHERE ch.url_id=u.url_id ORDER BY ch.completed_at DESC LIMIT 1),'')
+       COALESCE((SELECT ch.error_code FROM crawl_history ch WHERE ch.url_id=u.url_id ORDER BY ch.completed_at DESC LIMIT 1),''),
+       COALESCE(dc.canonical_url,''),COALESCE(dc.robots_noindex,false),COALESCE(dc.robots_nofollow,false)
 FROM webmaster_sites s
 LEFT JOIN urls u ON u.domain_id=s.domain_id AND u.normalized_url=$3
+LEFT JOIN LATERAL (
+    SELECT canonical_url,robots_noindex,robots_nofollow
+    FROM document_content
+    WHERE url_id=u.url_id
+    ORDER BY version DESC
+    LIMIT 1
+) dc ON true
 WHERE s.site_id=$1 AND s.user_id=$2`, siteID,userID,normalizedURL).
-		Scan(&out.URLID,&out.URL,&out.CrawlStatus,&out.IndexStatus,&out.HTTPStatus,&out.LastCrawlAt,&out.LastError)
+		Scan(&out.URLID,&out.URL,&out.CrawlStatus,&out.IndexStatus,&out.HTTPStatus,&out.LastCrawlAt,&out.LastError,&out.CanonicalURL,&out.RobotsNoIndex,&out.RobotsNoFollow)
 	if errors.Is(err,pgx.ErrNoRows) { return URLStatus{},ErrNotFound }
 	if err != nil { return URLStatus{},fmt.Errorf("load URL status: %w",err) }
 	return out,nil
