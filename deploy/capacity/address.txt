@@ -1,0 +1,8 @@
+/api/address/search?q=Москва%20Тверская&limit=20
+/api/address/search?q=Казань%20Баумана&limit=20
+/api/address/search?q=Екатеринбург%20Ленина&limit=20
+/api/address/search?q=Новосибирск%20Красный%20проспект&limit=20
+/api/address/autocomplete?q=Москва%20Твер&limit=10
+/api/address/autocomplete?q=Казань%20Баум&limit=10
+/api/address/reverse?lat=55.755826&lon=37.617300&radius_m=1500&limit=10
+/api/address/reverse?lat=55.796127&lon=49.106405&radius_m=1500&limit=10
