@@ -23,47 +23,21 @@ func Up(ctx context.Context, db *pgxpool.Pool, dir string) error {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
-	}
-
-	migrations := make([]migration, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-		prefix, _, ok := strings.Cut(entry.Name(), "_")
-		if !ok {
-			return fmt.Errorf("invalid migration filename %q", entry.Name())
-		}
-		version, err := strconv.ParseInt(prefix, 10, 64)
-		if err != nil {
-			return fmt.Errorf("invalid migration version %q: %w", entry.Name(), err)
-		}
-		migrations = append(migrations, migration{version: version, path: filepath.Join(dir, entry.Name()), name: entry.Name()})
-	}
-
-	sort.Slice(migrations, func(i, j int) bool { return migrations[i].version < migrations[j].version })
+	migrations, err := loadMigrations(dir)
+	if err != nil { return err }
 
 	for _, m := range migrations {
 		var applied bool
 		if err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, m.version).Scan(&applied); err != nil {
 			return fmt.Errorf("check migration %s: %w", m.name, err)
 		}
-		if applied {
-			continue
-		}
+		if applied { continue }
 
 		body, err := os.ReadFile(m.path)
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", m.name, err)
-		}
+		if err != nil { return fmt.Errorf("read migration %s: %w", m.name, err) }
 
 		tx, err := db.Begin(ctx)
-		if err != nil {
-			return fmt.Errorf("begin migration %s: %w", m.name, err)
-		}
+		if err != nil { return fmt.Errorf("begin migration %s: %w", m.name, err) }
 		if _, err = tx.Exec(ctx, string(body)); err != nil {
 			_ = tx.Rollback(ctx)
 			return fmt.Errorf("execute migration %s: %w", m.name, err)
@@ -72,10 +46,34 @@ func Up(ctx context.Context, db *pgxpool.Pool, dir string) error {
 			_ = tx.Rollback(ctx)
 			return fmt.Errorf("record migration %s: %w", m.name, err)
 		}
-		if err = tx.Commit(ctx); err != nil {
-			return fmt.Errorf("commit migration %s: %w", m.name, err)
-		}
+		if err = tx.Commit(ctx); err != nil { return fmt.Errorf("commit migration %s: %w", m.name, err) }
+	}
+	return nil
+}
+
+func loadMigrations(dir string) ([]migration, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil { return nil, fmt.Errorf("read migrations dir: %w", err) }
+
+	migrations := make([]migration, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") { continue }
+		prefix, _, ok := strings.Cut(entry.Name(), "_")
+		if !ok { return nil, fmt.Errorf("invalid migration filename %q", entry.Name()) }
+		version, err := strconv.ParseInt(prefix, 10, 64)
+		if err != nil { return nil, fmt.Errorf("invalid migration version %q: %w", entry.Name(), err) }
+		if version <= 0 { return nil, fmt.Errorf("invalid migration version %q: must be positive", entry.Name()) }
+		migrations = append(migrations, migration{version: version, path: filepath.Join(dir, entry.Name()), name: entry.Name()})
 	}
 
-	return nil
+	sort.Slice(migrations, func(i, j int) bool {
+		if migrations[i].version == migrations[j].version { return migrations[i].name < migrations[j].name }
+		return migrations[i].version < migrations[j].version
+	})
+	for i := 1; i < len(migrations); i++ {
+		if migrations[i-1].version == migrations[i].version {
+			return nil, fmt.Errorf("duplicate migration version %06d: %s and %s", migrations[i].version, migrations[i-1].name, migrations[i].name)
+		}
+	}
+	return migrations, nil
 }
