@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/venomimonstro/poisk/internal/identity"
@@ -12,6 +14,8 @@ import (
 func registerAccountRoutes(router chi.Router,apiGuard *guard.Middleware,cfg config.Config,pool *pgxpool.Pool){
 	repo:=identity.NewRepository(pool)
 	service:=&identity.Service{Repo:repo}
-	handler:=identityhttp.Handler{Service:service,SecureCookies:cfg.Env!="development"}
+	env:=strings.ToLower(strings.TrimSpace(cfg.Env))
+	secureCookies:=env!="dev"&&env!="development"&&env!="local"&&env!="test"
+	handler:=identityhttp.Handler{Service:service,SecureCookies:secureCookies}
 	router.Mount("/api/account",apiGuard.Protect(handler.Routes()))
 }
