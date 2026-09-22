@@ -33,6 +33,7 @@ type QueueSnapshot struct{
 
 type ThroughputSnapshot struct{
 	CrawlPerSecond float64 `json:"crawl_per_second"`
+	ExtractPerSecond float64 `json:"extract_per_second"`
 	IndexPerSecond float64 `json:"index_per_second"`
 	DataHubChangesPerSecond float64 `json:"datahub_changes_per_second"`
 	WindowSeconds int `json:"window_seconds"`
@@ -88,11 +89,12 @@ func (r *Repository) CollectDatabase(ctx context.Context)(DatabaseSnapshot,error
  count(*) FILTER(WHERE status='LEASED'),
  count(*) FILTER(WHERE status='DEAD')
  FROM index_outbox`).Scan(&out.Queues.OutboxReady,&out.Queues.OutboxLeased,&out.Queues.OutboxDead);err!=nil{return out,err}
-	var crawled,indexed,hub int64
+	var crawled,extracted,indexed,hub int64
 	if err:=r.db.QueryRow(ctx,`SELECT count(*) FROM crawl_history WHERE completed_at>=now()-interval '1 hour'`).Scan(&crawled);err!=nil{return out,err}
+	if err:=r.db.QueryRow(ctx,`SELECT count(*) FROM document_content WHERE created_at>=now()-interval '1 hour'`).Scan(&extracted);err!=nil{return out,err}
 	if err:=r.db.QueryRow(ctx,`SELECT count(*) FROM index_outbox WHERE processed_at>=now()-interval '1 hour' AND status='PROCESSED'`).Scan(&indexed);err!=nil{return out,err}
 	if err:=r.db.QueryRow(ctx,`SELECT count(*) FROM datahub_publication_events WHERE created_at>=now()-interval '1 hour'`).Scan(&hub);err!=nil{return out,err}
-	out.Throughput.CrawlPerSecond=float64(crawled)/3600;out.Throughput.IndexPerSecond=float64(indexed)/3600;out.Throughput.DataHubChangesPerSecond=float64(hub)/3600
+	out.Throughput.CrawlPerSecond=float64(crawled)/3600;out.Throughput.ExtractPerSecond=float64(extracted)/3600;out.Throughput.IndexPerSecond=float64(indexed)/3600;out.Throughput.DataHubChangesPerSecond=float64(hub)/3600
 	return out,nil
 }
 
