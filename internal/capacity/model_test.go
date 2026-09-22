@@ -33,6 +33,14 @@ func TestClassifyCapacitySignals(t *testing.T){
 	if len(want)!=0{t.Fatalf("missing bottlenecks=%v got=%+v",want,got)}
 }
 
+func TestIndexCountMismatchTolerance(t *testing.T){
+	if indexCountMismatch(1_000_000,995_000){t.Fatal("0.5% mismatch should be tolerated")}
+	if !indexCountMismatch(1_000_000,980_000){t.Fatal("2% mismatch should be classified")}
+	got:=Classify(Signals{DBIndexedDocuments:1_000_000,ManticoreDocuments:970_000})
+	found:=false;for _,b:=range got{if b.Code=="INDEX_COUNT_MISMATCH"{found=true}}
+	if !found{t.Fatalf("bottlenecks=%+v",got)}
+}
+
 func TestRecommendChoiceThresholdsAreAdvisoryAndDeterministic(t *testing.T){
 	cases:=[]struct{name string;b []Bottleneck;want string}{
 		{"healthy",nil,"STAY_SINGLE_NODE"},
