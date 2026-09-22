@@ -48,6 +48,7 @@ export default function MapPage() {
   const [version, setVersion] = useState("");
   const [selected, setSelected] = useState<GeoResult | null>(null);
   const [geoMeta, setGeoMeta] = useState("");
+  const [mobile, setMobile] = useState(false);
 
   function selectOrganization(item: GeoResult) {
     setSelected(item);
@@ -55,6 +56,13 @@ export default function MapPage() {
       mapRef.current.easeTo({ center: [item.longitude, item.latitude], zoom: Math.max(mapRef.current.getZoom(), 15) });
     }
   }
+
+  useEffect(() => {
+    const updateViewport = () => setMobile(window.innerWidth <= 640);
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,6 +197,10 @@ export default function MapPage() {
     };
   }, []);
 
+  const cardStyle: React.CSSProperties = mobile
+    ? { top: 136, bottom: 12, left: 12, width: "calc(100vw - 24px)", maxHeight: "calc(100vh - 148px)", overflowY: "auto" }
+    : { maxHeight: "calc(100vh - 100px)", overflowY: "auto" };
+
   return (
     <main className="mapPage">
       <header className="mapHeader">
@@ -202,7 +214,7 @@ export default function MapPage() {
       <div className="mapViewport" ref={containerRef} aria-label="Интерактивная карта" />
       <MapSearchPanel onSelect={selectOrganization} />
       {selected && (
-        <aside className="geoCard" aria-label="Организация" style={{ maxHeight: "calc(100vh - 100px)", overflowY: "auto" }}>
+        <aside className="geoCard" aria-label="Организация" style={cardStyle}>
           <button className="geoCardClose" type="button" onClick={() => setSelected(null)} aria-label="Закрыть">×</button>
           <div className="geoCardCategory">{selected.category_key || "Организация"}</div>
           <strong className="geoCardTitle">{selected.name}</strong>
