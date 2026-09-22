@@ -46,14 +46,15 @@ func (r *Repository) Record(ctx context.Context,s Snapshot,now time.Time)(Gap,er
 VALUES($1,$2,1,$3,$4,$5,$6,$7,$8,$9,$10)
 ON CONFLICT(query_hash,bucket_start) DO UPDATE SET
  hits=LEAST(3,query_signal_buckets.hits+1),
- zero_result_hits=LEAST(3,query_signal_buckets.zero_result_hits+EXCLUDED.zero_result_hits),
- low_quality_hits=LEAST(3,query_signal_buckets.low_quality_hits+EXCLUDED.low_quality_hits),
- low_freshness_hits=LEAST(3,query_signal_buckets.low_freshness_hits+EXCLUDED.low_freshness_hits),
- high_spam_hits=LEAST(3,query_signal_buckets.high_spam_hits+EXCLUDED.high_spam_hits),
- result_count_sum=LEAST(300,query_signal_buckets.result_count_sum+EXCLUDED.result_count_sum),
- quality_sum=LEAST(300,query_signal_buckets.quality_sum+EXCLUDED.quality_sum),
- freshness_sum=LEAST(300,query_signal_buckets.freshness_sum+EXCLUDED.freshness_sum),
- spam_sum=LEAST(300,query_signal_buckets.spam_sum+EXCLUDED.spam_sum),updated_at=now()`,hash[:],bucket,zero,lowQ,lowF,highSpam,resultCap,int(s.AverageQuality),int(s.AverageFreshness),int(s.AverageSpam));if err!=nil{return Gap{},err}
+ zero_result_hits=query_signal_buckets.zero_result_hits + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.zero_result_hits ELSE 0 END,
+ low_quality_hits=query_signal_buckets.low_quality_hits + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.low_quality_hits ELSE 0 END,
+ low_freshness_hits=query_signal_buckets.low_freshness_hits + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.low_freshness_hits ELSE 0 END,
+ high_spam_hits=query_signal_buckets.high_spam_hits + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.high_spam_hits ELSE 0 END,
+ result_count_sum=query_signal_buckets.result_count_sum + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.result_count_sum ELSE 0 END,
+ quality_sum=query_signal_buckets.quality_sum + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.quality_sum ELSE 0 END,
+ freshness_sum=query_signal_buckets.freshness_sum + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.freshness_sum ELSE 0 END,
+ spam_sum=query_signal_buckets.spam_sum + CASE WHEN query_signal_buckets.hits<3 THEN EXCLUDED.spam_sum ELSE 0 END,
+ updated_at=now()`,hash[:],bucket,zero,lowQ,lowF,highSpam,resultCap,int(s.AverageQuality),int(s.AverageFreshness),int(s.AverageSpam));if err!=nil{return Gap{},err}
 
 	for _,host:=range normalizeHosts(s.Hosts){
 		_,err=tx.Exec(ctx,`INSERT INTO query_gap_domain_observations(query_hash,domain_id,first_seen_at,last_seen_at,seen_buckets)
