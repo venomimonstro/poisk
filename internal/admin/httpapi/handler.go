@@ -34,10 +34,13 @@ func (h Handler) Routes()http.Handler{
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/status",h.Status)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/domains",h.Domains)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/diagnostics",h.DiagnosticsSnapshot)
+		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/query-gaps",h.QueryGaps)
 		protected.With(h.RequireRoles("SUPERADMIN")).Get("/owner",h.OwnerDashboard)
 		protected.With(h.requireCSRF).Post("/logout",h.Logout)
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/domains/preview",h.DomainPreview)
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/domains/apply",h.DomainApply)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/query-gaps/preview",h.QueryGapPreview)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/query-gaps/apply",h.QueryGapApply)
 	})
 	return r
 }
