@@ -44,6 +44,7 @@ func (h Handler) Routes()http.Handler{
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/answer/metrics",h.AnswerMetrics)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/organizations/imports",h.OrganizationImports)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/organizations/reviews",h.OrganizationReviews)
+		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/reviews/moderation",h.ReviewModerationQueue)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/maps/state",h.MapState)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/addresses/data",h.AddressData)
 		protected.With(h.RequireRoles("OPERATOR")).Get("/users/sessions",h.ConsumerSessions)
@@ -58,6 +59,8 @@ func (h Handler) Routes()http.Handler{
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/datahub/apply",h.DataHubApply)
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/organizations/reviews/preview",h.OrganizationReviewPreview)
 		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/organizations/reviews/apply",h.OrganizationReviewApply)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/reviews/moderation/preview",h.ReviewModerationPreview)
+		protected.With(h.RequireRoles("OPERATOR"),h.requireCSRF).Post("/reviews/moderation/apply",h.ReviewModerationApply)
 	})
 	return r
 }
