@@ -154,6 +154,7 @@ func runAPI(cfg config.Config, pool *pgxpool.Pool) error {
 	registerAccountRoutes(router,apiGuard,cfg,pool)
 	registerWebmasterPortalRoutes(router,apiGuard,pool,webmasterService,billingRepo)
 	router.Mount("/api/webmaster", apiGuard.Protect(webmasterHandler.Routes()))
+	registerBillingRoutes(router,apiGuard,pool,webmasterService)
 	if err:=registerGeoRoute(router,apiGuard,cfg);err!=nil{return err}
 	if err:=registerAddressRoutes(router,apiGuard,cfg,pool);err!=nil{return err}
 	if err:=registerAdminRoutes(router,apiGuard,pool);err!=nil{return err}
