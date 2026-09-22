@@ -18,4 +18,5 @@ func registerAccountRoutes(router chi.Router,apiGuard guard.Middleware,cfg confi
 	secureCookies:=env!="dev"&&env!="development"&&env!="local"&&env!="test"
 	handler:=identityhttp.Handler{Service:service,SecureCookies:secureCookies}
 	router.Mount("/api/account",apiGuard.Protect(handler.Routes()))
+	registerReviewRoutes(router,apiGuard,pool)
 }
