@@ -85,6 +85,8 @@ func run() error {
 		return runDemandCtl(ctx, pool, os.Args[2:])
 	case "datahubctl":
 		return runDataHubCtl(ctx, pool, os.Args[2:])
+	case "capacityctl":
+		return runCapacityCtl(ctx, pool, os.Args[2:])
 	case "mapctl":
 		return runMapCtl(ctx, pool, os.Args[2:])
 	case "orgctl":
