@@ -1,0 +1,59 @@
+package gatewayhttp
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	mailcore "github.com/venomimonstro/poisk/internal/mail"
+)
+
+const maxGatewayJSONBytes int64 = 29 << 20
+
+type Handler struct {
+	Repo mailcore.Repository
+	Inbound mailcore.InboundStore
+	Secret []byte
+}
+
+type recipientRequest struct{Recipient string `json:"recipient"`}
+type inboundRequest struct{EventID string `json:"event_id"`;Recipient string `json:"recipient"`;RawBase64 string `json:"raw_base64"`}
+
+func (h Handler) Routes() http.Handler {
+	r:=chi.NewRouter()
+	r.Post("/recipient",h.Recipient)
+	r.Post("/inbound",h.InboundMessage)
+	return r
+}
+
+func (h Handler) verify(w http.ResponseWriter,r *http.Request,max int64)([]byte,bool){
+	if len(h.Secret)<32||h.Repo.DB==nil{writeError(w,http.StatusServiceUnavailable,"gateway_unavailable");return nil,false}
+	r.Body=http.MaxBytesReader(w,r.Body,max);body,err:=io.ReadAll(r.Body);if err!=nil{writeError(w,http.StatusRequestEntityTooLarge,"request_too_large");return nil,false}
+	nonce:=r.Header.Get("X-Poisk-Gateway-Event");ts:=r.Header.Get("X-Poisk-Gateway-Timestamp");sig:=r.Header.Get("X-Poisk-Gateway-Signature")
+	hash,_,err:=mailcore.VerifyGatewayRequest(h.Secret,nonce,ts,body,sig,time.Now().UTC());if err!=nil{writeError(w,http.StatusUnauthorized,"gateway_auth_failed");return nil,false}
+	if err=h.Repo.ClaimGatewayEvent(r.Context(),nonce,hash,time.Now().UTC());err!=nil{if errors.Is(err,mailcore.ErrGatewayReplay){writeError(w,http.StatusConflict,"gateway_replay");return nil,false};writeError(w,http.StatusUnauthorized,"gateway_auth_failed");return nil,false}
+	return body,true
+}
+
+func decodeOne(body []byte,dst any)error{dec:=json.NewDecoder(strings.NewReader(string(body)));dec.DisallowUnknownFields();if err:=dec.Decode(dst);err!=nil{return err};var extra any;err:=dec.Decode(&extra);if errors.Is(err,io.EOF){return nil};if err==nil{return errors.New("trailing json")};return err}
+
+func (h Handler) Recipient(w http.ResponseWriter,r *http.Request){
+	body,ok:=h.verify(w,r,8<<10);if !ok{return};var in recipientRequest;if err:=decodeOne(body,&in);err!=nil{writeError(w,http.StatusBadRequest,"invalid_json");return}
+	mailboxID,err:=h.Inbound.ResolveRecipient(r.Context(),in.Recipient);if err!=nil{if errors.Is(err,mailcore.ErrNotFound){writeError(w,http.StatusNotFound,"recipient_not_found");return};writeError(w,http.StatusBadRequest,"invalid_recipient");return}
+	writeJSON(w,http.StatusOK,map[string]any{"accepted":true,"mailbox_id":mailboxID})
+}
+
+func (h Handler) InboundMessage(w http.ResponseWriter,r *http.Request){
+	body,ok:=h.verify(w,r,maxGatewayJSONBytes);if !ok{return};var in inboundRequest;if err:=decodeOne(body,&in);err!=nil{writeError(w,http.StatusBadRequest,"invalid_json");return}
+	raw,err:=base64.StdEncoding.DecodeString(in.RawBase64);if err!=nil||len(raw)==0||len(raw)>mailcore.MaxInboundRawBytes{writeError(w,http.StatusBadRequest,"invalid_mime");return}
+	messageID,duplicate,err:=h.Inbound.Ingest(r.Context(),in.EventID,in.Recipient,raw,time.Now().UTC());if err!=nil{switch{case errors.Is(err,mailcore.ErrNotFound):writeError(w,http.StatusNotFound,"recipient_not_found");case errors.Is(err,mailcore.ErrDangerousMailPart):writeError(w,http.StatusUnprocessableEntity,"dangerous_mime_part");case errors.Is(err,mailcore.ErrConflict):writeError(w,http.StatusConflict,"inbound_event_conflict");case errors.Is(err,mailcore.ErrRateLimited):writeError(w,http.StatusInsufficientStorage,"mailbox_quota_exceeded");case errors.Is(err,mailcore.ErrInvalid):writeError(w,http.StatusBadRequest,"invalid_mime");default:writeError(w,http.StatusServiceUnavailable,"inbound_unavailable")};return}
+	writeJSON(w,http.StatusOK,map[string]any{"accepted":true,"message_id":messageID,"duplicate":duplicate})
+}
+
+func writeJSON(w http.ResponseWriter,status int,v any){w.Header().Set("Content-Type","application/json; charset=utf-8");w.Header().Set("Cache-Control","no-store");w.Header().Set("X-Content-Type-Options","nosniff");w.WriteHeader(status);_ = json.NewEncoder(w).Encode(v)}
+func writeError(w http.ResponseWriter,status int,code string){writeJSON(w,status,map[string]string{"error":code})}
