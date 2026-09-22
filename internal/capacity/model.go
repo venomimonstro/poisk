@@ -11,6 +11,7 @@ var ErrInvalid=errors.New("invalid capacity benchmark input")
 
 type WorkloadMetrics struct{
 	Requests int64 `json:"requests"`
+	SampledRequests int64 `json:"sampled_requests"`
 	Errors int64 `json:"errors"`
 	ErrorRate float64 `json:"error_rate"`
 	QPS float64 `json:"qps"`
@@ -58,12 +59,17 @@ type Signals struct{
 type Bottleneck struct{Code string `json:"code"`;Severity string `json:"severity"`;Detail string `json:"detail"`}
 
 func ComputeWorkload(samples []time.Duration,errorsCount int64,elapsed time.Duration)WorkloadMetrics{
+	return ComputeWorkloadCounts(samples,int64(len(samples)),errorsCount,elapsed)
+}
+
+func ComputeWorkloadCounts(samples []time.Duration,requests,errorsCount int64,elapsed time.Duration)WorkloadMetrics{
 	if elapsed<=0{elapsed=time.Nanosecond}
+	if requests<0{requests=0};if errorsCount<0{errorsCount=0};if errorsCount>requests{errorsCount=requests}
 	clean:=make([]time.Duration,0,len(samples));for _,d:=range samples{if d<0{d=0};clean=append(clean,d)}
 	sort.Slice(clean,func(i,j int)bool{return clean[i]<clean[j]})
-	requests:=int64(len(clean));if errorsCount<0{errorsCount=0};if errorsCount>requests{errorsCount=requests}
-	metric:=WorkloadMetrics{Requests:requests,Errors:errorsCount,ElapsedMS:elapsed.Milliseconds()}
-	metric.QPS=float64(requests)/elapsed.Seconds();if requests>0{metric.ErrorRate=float64(errorsCount)/float64(requests);metric.P50MS=durationMS(percentile(clean,.50));metric.P95MS=durationMS(percentile(clean,.95));metric.P99MS=durationMS(percentile(clean,.99));metric.MaxMS=durationMS(clean[len(clean)-1])}
+	metric:=WorkloadMetrics{Requests:requests,SampledRequests:int64(len(clean)),Errors:errorsCount,ElapsedMS:elapsed.Milliseconds()}
+	metric.QPS=float64(requests)/elapsed.Seconds();if requests>0{metric.ErrorRate=float64(errorsCount)/float64(requests)}
+	if len(clean)>0{metric.P50MS=durationMS(percentile(clean,.50));metric.P95MS=durationMS(percentile(clean,.95));metric.P99MS=durationMS(percentile(clean,.99));metric.MaxMS=durationMS(clean[len(clean)-1])}
 	return metric
 }
 
