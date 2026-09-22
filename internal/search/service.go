@@ -83,17 +83,31 @@ func (s *Service) Search(ctx context.Context, req Request) (Response, error) {
 	}
 
 	reranked := rerank(found.Hits)
-	resp := Response{Query: req.Query, Normalized: norm.Primary, UsedQuery: used, Total: found.Total, TookMS: found.TookMS, Coverage:coverageSnapshot(found.Hits)}
+	resp := Response{Query: req.Query, Normalized: norm.Primary, UsedQuery: used, Total: found.Total, TookMS: found.TookMS, Coverage:coverageSnapshotAt(found.Hits,time.Now().UTC())}
 	resp.Results = diversify(reranked, limit, 2)
 	if s.Cache != nil { s.Cache.Put(cacheKey, resp, 30*time.Second) }
 	return resp, nil
 }
 
-func coverageSnapshot(hits []backend.Hit)CoverageSnapshot{
+func coverageSnapshotAt(hits []backend.Hit,now time.Time)CoverageSnapshot{
 	if len(hits)==0{return CoverageSnapshot{AverageFreshness:50}}
-	limit:=len(hits);if limit>10{limit=10};var q,spam float64
-	for i:=0;i<limit;i++{q+=hits[i].QualityScore;spam+=hits[i].SpamScore}
-	return CoverageSnapshot{AverageQuality:q/float64(limit),AverageFreshness:50,AverageSpam:spam/float64(limit)}
+	if now.IsZero(){now=time.Now().UTC()};now=now.UTC()
+	limit:=len(hits);if limit>10{limit=10};var q,spam,fresh float64
+	for i:=0;i<limit;i++{q+=hits[i].QualityScore;spam+=hits[i].SpamScore;fresh+=freshnessScore(hits[i].FetchedAtUnix,now)}
+	return CoverageSnapshot{AverageQuality:q/float64(limit),AverageFreshness:fresh/float64(limit),AverageSpam:spam/float64(limit)}
+}
+
+func freshnessScore(fetchedUnix int64,now time.Time)float64{
+	if fetchedUnix<=0{return 50}
+	fetched:=time.Unix(fetchedUnix,0).UTC();age:=now.Sub(fetched)
+	if age<0{age=0}
+	switch{
+	case age<=24*time.Hour:return 100
+	case age<=7*24*time.Hour:return 85
+	case age<=30*24*time.Hour:return 65
+	case age<=90*24*time.Hour:return 45
+	default:return 25
+	}
 }
 
 func (s *Service) searchBackend(ctx context.Context, q string, limit int) (backend.Result, error) {
