@@ -87,7 +87,7 @@ func TestApplyReplacesEqualOrNewerVersion(t *testing.T) {
 	}
 }
 
-func TestEnsureSchemaAddsAuthorityOnlyWhenMissing(t *testing.T) {
+func TestEnsureSchemaRepairsMissingWebAttributes(t *testing.T) {
 	var queries []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -107,9 +107,9 @@ func TestEnsureSchemaAddsAuthorityOnlyWhenMissing(t *testing.T) {
 	defer srv.Close()
 	c, _ := New(Config{BaseURL: srv.URL})
 	if err := c.EnsureSchema(context.Background()); err != nil { t.Fatal(err) }
-	if len(queries) != 3 || !strings.Contains(queries[2], "ADD COLUMN authority_score FLOAT") {
-		t.Fatalf("queries=%v", queries)
-	}
+	if len(queries) != 4 { t.Fatalf("queries=%v", queries) }
+	if !strings.Contains(queries[2], "ADD COLUMN authority_score FLOAT") { t.Fatalf("queries=%v", queries) }
+	if !strings.Contains(queries[3], "ADD COLUMN fetched_at TIMESTAMP") { t.Fatalf("queries=%v", queries) }
 }
 
 func TestRawHasColumnIsCaseInsensitive(t *testing.T) {
