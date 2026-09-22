@@ -42,28 +42,45 @@ func (r *Repository) directoryAggregates(ctx context.Context,limit int,now time.
 	const q=`WITH active_orgs AS (
  SELECT o.place_id,o.city_key,o.category_key,o.website,o.address,o.quality_score,o.updated_at
  FROM organizations o WHERE o.status='ACTIVE'
-), source_counts AS (
- SELECT l.place_id,count(DISTINCT l.source_key)::int AS sources FROM organization_source_links l GROUP BY l.place_id
-), base AS (
- SELECT a.*,COALESCE(s.sources,0) sources FROM active_orgs a LEFT JOIN source_counts s ON s.place_id=a.place_id
-), aggregates AS (
- SELECT 'CITY'::text page_type,city_key,NULL::text category_key,count(*)::int organizations,
+), city_stats AS (
+ SELECT city_key,count(*)::int organizations,
         count(*) FILTER(WHERE website IS NOT NULL AND btrim(website)<>'')::int with_website,
         count(*) FILTER(WHERE address IS NOT NULL AND btrim(address)<>'')::int with_address,
-        COALESCE(avg(quality_score),0)::float8 average_quality,COALESCE(max(sources),0)::int distinct_sources,max(updated_at) updated_at
- FROM base WHERE city_key IS NOT NULL GROUP BY city_key
+        COALESCE(avg(quality_score),0)::float8 average_quality,max(updated_at) updated_at
+ FROM active_orgs WHERE city_key IS NOT NULL GROUP BY city_key
+), city_sources AS (
+ SELECT o.city_key,count(DISTINCT l.source_key)::int distinct_sources
+ FROM active_orgs o JOIN organization_source_links l ON l.place_id=o.place_id
+ WHERE o.city_key IS NOT NULL GROUP BY o.city_key
+), category_stats AS (
+ SELECT category_key,count(*)::int organizations,
+        count(*) FILTER(WHERE website IS NOT NULL AND btrim(website)<>'')::int with_website,
+        count(*) FILTER(WHERE address IS NOT NULL AND btrim(address)<>'')::int with_address,
+        COALESCE(avg(quality_score),0)::float8 average_quality,max(updated_at) updated_at
+ FROM active_orgs WHERE category_key IS NOT NULL GROUP BY category_key
+), category_sources AS (
+ SELECT o.category_key,count(DISTINCT l.source_key)::int distinct_sources
+ FROM active_orgs o JOIN organization_source_links l ON l.place_id=o.place_id
+ WHERE o.category_key IS NOT NULL GROUP BY o.category_key
+), cc_stats AS (
+ SELECT city_key,category_key,count(*)::int organizations,
+        count(*) FILTER(WHERE website IS NOT NULL AND btrim(website)<>'')::int with_website,
+        count(*) FILTER(WHERE address IS NOT NULL AND btrim(address)<>'')::int with_address,
+        COALESCE(avg(quality_score),0)::float8 average_quality,max(updated_at) updated_at
+ FROM active_orgs WHERE city_key IS NOT NULL AND category_key IS NOT NULL GROUP BY city_key,category_key
+), cc_sources AS (
+ SELECT o.city_key,o.category_key,count(DISTINCT l.source_key)::int distinct_sources
+ FROM active_orgs o JOIN organization_source_links l ON l.place_id=o.place_id
+ WHERE o.city_key IS NOT NULL AND o.category_key IS NOT NULL GROUP BY o.city_key,o.category_key
+), aggregates AS (
+ SELECT 'CITY'::text page_type,c.city_key,NULL::text category_key,c.organizations,c.with_website,c.with_address,c.average_quality,COALESCE(s.distinct_sources,0) distinct_sources,c.updated_at
+ FROM city_stats c LEFT JOIN city_sources s USING(city_key)
  UNION ALL
- SELECT 'CATEGORY',NULL,category_key,count(*)::int,
-        count(*) FILTER(WHERE website IS NOT NULL AND btrim(website)<>'')::int,
-        count(*) FILTER(WHERE address IS NOT NULL AND btrim(address)<>'')::int,
-        COALESCE(avg(quality_score),0)::float8,COALESCE(max(sources),0)::int,max(updated_at)
- FROM base WHERE category_key IS NOT NULL GROUP BY category_key
+ SELECT 'CATEGORY',NULL,c.category_key,c.organizations,c.with_website,c.with_address,c.average_quality,COALESCE(s.distinct_sources,0),c.updated_at
+ FROM category_stats c LEFT JOIN category_sources s USING(category_key)
  UNION ALL
- SELECT 'CITY_CATEGORY',city_key,category_key,count(*)::int,
-        count(*) FILTER(WHERE website IS NOT NULL AND btrim(website)<>'')::int,
-        count(*) FILTER(WHERE address IS NOT NULL AND btrim(address)<>'')::int,
-        COALESCE(avg(quality_score),0)::float8,COALESCE(max(sources),0)::int,max(updated_at)
- FROM base WHERE city_key IS NOT NULL AND category_key IS NOT NULL GROUP BY city_key,category_key
+ SELECT 'CITY_CATEGORY',c.city_key,c.category_key,c.organizations,c.with_website,c.with_address,c.average_quality,COALESCE(s.distinct_sources,0),c.updated_at
+ FROM cc_stats c LEFT JOIN cc_sources s USING(city_key,category_key)
 )
 SELECT page_type,COALESCE(city_key,''),COALESCE(category_key,''),organizations,with_website,with_address,average_quality,distinct_sources,COALESCE(updated_at,$2)
 FROM aggregates ORDER BY page_type,city_key NULLS FIRST,category_key NULLS FIRST LIMIT $1`
@@ -91,7 +108,7 @@ VALUES($1,NULLIF($2,''),NULLIF($3,''),$4,$5,$6,1,$7,$8,$9,$10,$11,$12,$13) RETUR
 	if err!=nil{return "",false,err}
 	newState:="DRAFT";if gate.Publish{newState="PUBLISHED"}else if oldState=="PUBLISHED"||oldState=="SUPPRESSED"{newState="SUPPRESSED"}
 	if oldHash!=nil&&*oldHash==hash&&oldState==newState{_,err=tx.Exec(ctx,`UPDATE datahub_pages SET refreshed_at=$2,updated_at=now() WHERE page_id=$1`,pageID,now);if err!=nil{return "",false,err};if err=tx.Commit(ctx);err!=nil{return "",false,err};return newState,false,nil}
-	newVersion:=version+1;var published any=nil;if newState=="PUBLISHED"{published=now}
+	newVersion:=version+1
 	_,err=tx.Exec(ctx,`UPDATE datahub_pages SET state=$2,version=$3,evidence_count=$4,quality_score=$5,content_hash=$6,title=$7,meta_description=$8,published_at=CASE WHEN $2='PUBLISHED' THEN COALESCE(published_at,$9) ELSE published_at END,refreshed_at=$9,updated_at=now() WHERE page_id=$1`,pageID,newState,newVersion,a.Organizations,gate.Score,hash,title,meta,now);if err!=nil{return "",false,err}
 	if _,err=tx.Exec(ctx,`INSERT INTO datahub_page_versions(page_id,version,content_hash,evidence_count,quality_score,snapshot) VALUES($1,$2,$3,$4,$5,$6::jsonb)`,pageID,newVersion,hash,a.Organizations,gate.Score,string(raw));err!=nil{return "",false,err}
 	action:="BUILD";if newState=="PUBLISHED"&&oldState!="PUBLISHED"{action="PUBLISH"}else if oldState=="PUBLISHED"&&newState!="PUBLISHED"{action="UNPUBLISH"}
