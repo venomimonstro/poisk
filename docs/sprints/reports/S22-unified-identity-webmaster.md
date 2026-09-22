@@ -1,13 +1,13 @@
 # Sprint 22 — Unified Identity + Webmaster Cabinet
 
-**Status:** IN_PROGRESS — code/static implementation substantially complete; runtime/integration gate pending.
+**Status:** IN_PROGRESS — code/static product implementation complete enough for runtime gate; executable/integration evidence pending.
 
 ## Implemented
 
 - Canonical `consumer_users` identity independent from Admin identities.
 - Backfill/link from existing Webmaster users without changing historical Webmaster IDs.
 - Argon2id for new consumer passwords with PBKDF2 compatibility and login-time rehash.
-- Consumer/legacy Webmaster password hashes synchronized after rehash.
+- Consumer/legacy Webmaster password hashes synchronized transactionally after rehash.
 - Hashed session and CSRF tokens; raw session token is only delivered as an HttpOnly cookie.
 - SameSite=Strict consumer session cookie, environment-aware Secure flag.
 - Server-side session expiry/revocation, active-session cap, login failure lockout and security events.
@@ -17,6 +17,7 @@
 - `/webmaster` UI: login/register, site list/add, DNS/HTML/META verification, metrics, sitemap submit, URL submit/reindex/delete, URL status.
 - URL diagnostics expose HTTP/crawl/index status, latest crawler error, canonical URL, robots noindex/nofollow.
 - Webmaster Pro usage endpoint resolves billing account server-side and exposes current plan/limits/usage without accepting client account IDs.
+- Webmaster UI displays plan/limits/usage and active consumer sessions; sessions can be revoked from the cabinet.
 - Billing API was wired into API runtime; previously implemented routes are no longer dead code.
 - Public search navigation links Search / Maps / Webmaster / Data.
 - Regression coverage for Argon2 compatibility and CSRF mismatch.
@@ -41,7 +42,6 @@
 - Apply migrations from a previous production-like database snapshot and verify upgrade/rollback procedure.
 - Browser integration tests for register/login/cookie/CSRF/logout/session revoke.
 - Database integration tests for consumer-to-Webmaster mapping and explicit cross-tenant denial.
-- Surface account session management and Webmaster plan/usage in the UI (backend endpoints are ready).
 - Validate full verification flows against controlled DNS/HTTP fixtures.
 - Confirm analytics/usage with realistic indexed data.
 
