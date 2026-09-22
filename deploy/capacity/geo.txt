@@ -2,7 +2,7 @@
 /api/geo/search?q=стоматология&city=moscow&limit=20
 /api/geo/search?q=кафе&city=kazan&limit=20
 /api/geo/search?q=автосервис&city=ekaterinburg&limit=20
-/api/geo/nearby?lat=55.751244&lon=37.618423&radius_m=5000&limit=20
-/api/geo/nearby?lat=55.796127&lon=49.106405&radius_m=5000&limit=20
-/api/geo/nearby?lat=56.838011&lon=60.597465&radius_m=5000&limit=20
+/api/geo/search?q=аптека&lat=55.751244&lon=37.618423&radius=5000&limit=20
+/api/geo/search?q=кафе&lat=55.796127&lon=49.106405&radius=5000&limit=20
+/api/geo/search?q=автосервис&lat=56.838011&lon=60.597465&radius=5000&limit=20
 /api/geo/viewport?min_lat=55.65&min_lon=37.45&max_lat=55.85&max_lon=37.80&zoom=11&limit=200
