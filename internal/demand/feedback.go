@@ -47,13 +47,14 @@ LIMIT $2`,now,limit);if err!=nil{return FeedbackStats{},err}
 		if c.quality<lowest{reason="LOW_QUALITY";lowest=c.quality}
 		if c.freshness<lowest{reason="LOW_FRESHNESS"}
 		expires:=now.Add(6*time.Hour)
-		_,err=tx.Exec(ctx,`INSERT INTO query_gap_domain_feedback(gap_id,domain_id,boost,expires_at,reason,updated_at)
-VALUES($1,$2,$3,$4,$5,now())
-ON CONFLICT(gap_id,domain_id) DO UPDATE SET boost=GREATEST(query_gap_domain_feedback.boost,EXCLUDED.boost),expires_at=GREATEST(query_gap_domain_feedback.expires_at,EXCLUDED.expires_at),reason=EXCLUDED.reason,updated_at=now()`,c.gapID,c.domainID,boost,expires,reason);if err!=nil{return FeedbackStats{},err}
 		key:=fmt.Sprintf("gap:%d:domain:%d:%s",c.gapID,c.domainID,now.Format("2006010215"))
 		tag,err:=tx.Exec(ctx,`INSERT INTO query_gap_feedback_events(gap_id,domain_id,action,boost,idempotency_key,details)
 VALUES($1,$2,'BOOST_DOMAIN',$3,$4,jsonb_build_object('reason',$5,'expires_at',$6)) ON CONFLICT(idempotency_key) DO NOTHING`,c.gapID,c.domainID,boost,key,reason,expires);if err!=nil{return FeedbackStats{},err}
-		if tag.RowsAffected()>0{boosted++}
+		if tag.RowsAffected()==0{continue}
+		_,err=tx.Exec(ctx,`INSERT INTO query_gap_domain_feedback(gap_id,domain_id,boost,expires_at,reason,updated_at)
+VALUES($1,$2,$3,$4,$5,now())
+ON CONFLICT(gap_id,domain_id) DO UPDATE SET boost=GREATEST(query_gap_domain_feedback.boost,EXCLUDED.boost),expires_at=GREATEST(query_gap_domain_feedback.expires_at,EXCLUDED.expires_at),reason=EXCLUDED.reason,updated_at=now()`,c.gapID,c.domainID,boost,expires,reason);if err!=nil{return FeedbackStats{},err}
+		boosted++
 		_,err=tx.Exec(ctx,`UPDATE domains SET next_crawl_at=LEAST(COALESCE(next_crawl_at,$1+interval '30 minutes'),$1+interval '30 minutes'),updated_at=now() WHERE domain_id=$2 AND status='ACTIVE' AND policy IN ('ALLOW','LIMITED')`,now,c.domainID);if err!=nil{return FeedbackStats{},err}
 		_,err=tx.Exec(ctx,`UPDATE query_gaps SET last_feedback_at=$1,feedback_count=LEAST(1000,feedback_count+1) WHERE gap_id=$2`,now,c.gapID);if err!=nil{return FeedbackStats{},err}
 	}
