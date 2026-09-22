@@ -19,4 +19,5 @@ func registerAccountRoutes(router chi.Router,apiGuard guard.Middleware,cfg confi
 	handler:=identityhttp.Handler{Service:service,SecureCookies:secureCookies}
 	router.Mount("/api/account",apiGuard.Protect(handler.Routes()))
 	registerReviewRoutes(router,apiGuard,pool)
+	registerMailRoutes(router,apiGuard,pool,service)
 }
