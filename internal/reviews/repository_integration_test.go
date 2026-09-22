@@ -44,6 +44,7 @@ func TestOwnerReplyRequiresActiveClaimForSameConsumer(t *testing.T){
 	var wmID int64;if err:=pool.QueryRow(ctx,`INSERT INTO webmaster_users(email,password_hash,status,consumer_user_id) SELECT email,password_hash,'ACTIVE',user_id FROM consumer_users WHERE user_id=$1 RETURNING user_id`,owner).Scan(&wmID);err!=nil{t.Fatal(err)}
 	var siteID int64;if err:=pool.QueryRow(ctx,`INSERT INTO webmaster_sites(user_id,domain_id,origin,host,status,verified_at,verification_method) VALUES($1,$2,$3,$4,'VERIFIED',now(),'DNS_TXT') RETURNING site_id`,wmID,domainID,"https://"+host,host).Scan(&siteID);err!=nil{t.Fatal(err)}
 	var claimID int64;if err:=pool.QueryRow(ctx,`INSERT INTO organization_claims(place_id,user_id,site_id,proof_type,proof_host,status) VALUES($1,$2,$3,'VERIFIED_WEBSITE_HOST',$4,'ACTIVE') RETURNING claim_id`,placeID,wmID,siteID,host).Scan(&claimID);err!=nil{t.Fatal(err)}
+	if _,err:=repo.Upsert(ctx,owner,placeID,5,"Владелец не должен ставить рейтинг своей компании.");!errors.Is(err,ErrForbidden){t.Fatalf("claimed owner self-review err=%v",err)}
 	if _,err:=repo.Reply(ctx,other,review.ID,"Чужой пользователь не должен отвечать.");!errors.Is(err,ErrForbidden){t.Fatalf("other reply err=%v",err)}
 	reply,err:=repo.Reply(ctx,owner,review.ID,"Спасибо за ваш отзыв!");if err!=nil{t.Fatal(err)};if reply.Body==""{t.Fatal("empty owner reply")}
 	if _,err:=pool.Exec(ctx,`UPDATE organization_claims SET status='REVOKED',revoked_at=now(),updated_at=now() WHERE claim_id=$1`,claimID);err!=nil{t.Fatal(err)}
