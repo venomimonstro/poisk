@@ -42,7 +42,12 @@ type OwnerRepository struct{ DB *pgxpool.Pool }
 func (r OwnerRepository) Snapshot(ctx context.Context)(OwnerSnapshot,error){
 	if r.DB==nil{return OwnerSnapshot{},errors.New("owner repository database unavailable")}
 	var out OwnerSnapshot
-	if err:=r.DB.QueryRow(ctx,`SELECT count(*),count(*) FILTER(WHERE status='ACTIVE'),count(*) FILTER(WHERE status='LOCKED'),count(*) FILTER(WHERE status='DISABLED') FROM consumer_users`).Scan(&out.Users.Total,&out.Users.Active,&out.Users.Locked,&out.Users.Disabled);err!=nil{return OwnerSnapshot{},err}
+	if err:=r.DB.QueryRow(ctx,`SELECT
+ count(*),
+ count(*) FILTER(WHERE status='ACTIVE' AND (locked_until IS NULL OR locked_until<=now())),
+ count(*) FILTER(WHERE status='LOCKED' OR locked_until>now()),
+ count(*) FILTER(WHERE status='DISABLED')
+FROM consumer_users`).Scan(&out.Users.Total,&out.Users.Active,&out.Users.Locked,&out.Users.Disabled);err!=nil{return OwnerSnapshot{},err}
 	if err:=r.DB.QueryRow(ctx,`SELECT count(*),count(*) FILTER(WHERE status='VERIFIED'),count(*) FILTER(WHERE status='PENDING'),count(*) FILTER(WHERE status='SUSPENDED') FROM webmaster_sites`).Scan(&out.Webmaster.Sites,&out.Webmaster.Verified,&out.Webmaster.Pending,&out.Webmaster.Suspended);err!=nil{return OwnerSnapshot{},err}
 	if err:=r.DB.QueryRow(ctx,`SELECT count(*) FILTER(WHERE status='ACTIVE'),(SELECT count(*) FROM addresses WHERE status='ACTIVE') FROM organizations`).Scan(&out.Directory.Organizations,&out.Directory.Addresses);err!=nil{return OwnerSnapshot{},err}
 	var cap OwnerCapacity
