@@ -96,8 +96,9 @@ export default function HomePage() {
           <input aria-label="Поисковый запрос" placeholder="Найдите или спросите что угодно" value={query} onChange={(event) => setQuery(event.target.value)} maxLength={256} autoComplete="off" />
           <button type="submit" disabled={loading || query.trim().length === 0}>{loading ? "Ищем…" : "Найти"}</button>
         </form>
-        <nav className="productLinks" aria-label="Разделы поиска">
-          <a href="/map">Карта</a>
+        <nav className="productLinks" aria-label="Сервисы Поиска">
+          <a href="/map">Карты</a>
+          <a href="/webmaster">Вебмастер</a>
           <a href="/data">Данные</a>
         </nav>
       </section>
@@ -158,18 +159,20 @@ function AnswerCard({ answer }: { answer: AnswerResponse }) {
 function trackClick(url: string) {
   const body = JSON.stringify({ url });
   try {
-    const blob = new Blob([body], { type: "application/json" });
-    if (navigator.sendBeacon(`${apiBase}/api/click`, blob)) return;
-  } catch { /* fall through to keepalive fetch */ }
-  void fetch(`${apiBase}/api/click`, { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true }).catch(() => undefined);
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(`${apiBase}/api/click`, new Blob([body], { type: "application/json" }));
+      return;
+    }
+    void fetch(`${apiBase}/api/click`, { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true });
+  } catch { /* analytics must never block navigation */ }
 }
 
-function renderSnippet(value: string) {
-  const parts = value.split(/(\[\[|\]\])/g);
-  let highlighted = false;
+function renderSnippet(snippet: string) {
+  const parts = snippet.split(/(<mark>|<\/mark>)/gi);
+  let marked = false;
   return parts.map((part, index) => {
-    if (part === "[[") { highlighted = true; return null; }
-    if (part === "]]" ) { highlighted = false; return null; }
-    return highlighted ? <mark key={index}>{part}</mark> : <span key={index}>{part}</span>;
+    if (part.toLowerCase() === "<mark>") { marked = true; return null; }
+    if (part.toLowerCase() === "</mark>") { marked = false; return null; }
+    return marked ? <mark key={index}>{part}</mark> : <span key={index}>{part}</span>;
   });
 }
