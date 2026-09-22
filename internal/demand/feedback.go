@@ -9,6 +9,8 @@ import (
 type FeedbackStats struct{
 	Boosted int64 `json:"boosted"`
 	Expired int64 `json:"expired"`
+	PrunedBuckets int64 `json:"pruned_buckets"`
+	PrunedObservations int64 `json:"pruned_observations"`
 }
 
 func (r *Repository) MaterializeFeedback(ctx context.Context,limit int,now time.Time)(FeedbackStats,error){
@@ -17,6 +19,9 @@ func (r *Repository) MaterializeFeedback(ctx context.Context,limit int,now time.
 	tx,err:=r.db.Begin(ctx);if err!=nil{return FeedbackStats{},err};defer func(){_=tx.Rollback(ctx)}()
 
 	expiredTag,err:=tx.Exec(ctx,`DELETE FROM query_gap_domain_feedback WHERE expires_at <= $1`,now);if err!=nil{return FeedbackStats{},err}
+	bucketTag,err:=tx.Exec(ctx,`DELETE FROM query_signal_buckets WHERE bucket_start < $1-interval '7 days'`,now);if err!=nil{return FeedbackStats{},err}
+	observationTag,err:=tx.Exec(ctx,`DELETE FROM query_gap_domain_observations WHERE last_seen_at < $1-interval '7 days'`,now);if err!=nil{return FeedbackStats{},err}
+
 	rows,err:=tx.Query(ctx,`SELECT g.gap_id,o.domain_id,g.gap_score,g.coverage_score,g.quality_score,g.freshness_score
 FROM query_gaps g
 JOIN query_gap_domain_observations o ON o.query_hash=g.query_hash
@@ -29,11 +34,11 @@ WHERE g.state='OPEN'
   AND d.status='ACTIVE' AND d.policy IN ('ALLOW','LIMITED')
   AND (g.last_feedback_at IS NULL OR g.last_feedback_at <= $1-interval '30 minutes')
 ORDER BY g.gap_score DESC,g.last_seen_at DESC,g.gap_id,o.domain_id
-LIMIT $2`,now,limit);if err!=nil{return FeedbackStats{},err};defer rows.Close()
+LIMIT $2`,now,limit);if err!=nil{return FeedbackStats{},err}
 	type candidate struct{gapID,domainID int64;gap,coverage,quality,freshness int}
 	items:=make([]candidate,0,limit)
-	for rows.Next(){var c candidate;if err:=rows.Scan(&c.gapID,&c.domainID,&c.gap,&c.coverage,&c.quality,&c.freshness);err!=nil{return FeedbackStats{},err};items=append(items,c)}
-	if err:=rows.Err();err!=nil{return FeedbackStats{},err};rows.Close()
+	for rows.Next(){var c candidate;if err:=rows.Scan(&c.gapID,&c.domainID,&c.gap,&c.coverage,&c.quality,&c.freshness);err!=nil{rows.Close();return FeedbackStats{},err};items=append(items,c)}
+	if err:=rows.Err();err!=nil{rows.Close();return FeedbackStats{},err};rows.Close()
 
 	var boosted int64
 	for _,c:=range items{
@@ -53,5 +58,5 @@ VALUES($1,$2,'BOOST_DOMAIN',$3,$4,jsonb_build_object('reason',$5,'expires_at',$6
 		_,err=tx.Exec(ctx,`UPDATE query_gaps SET last_feedback_at=$1,feedback_count=LEAST(1000,feedback_count+1) WHERE gap_id=$2`,now,c.gapID);if err!=nil{return FeedbackStats{},err}
 	}
 	if err=tx.Commit(ctx);err!=nil{return FeedbackStats{},err}
-	return FeedbackStats{Boosted:boosted,Expired:expiredTag.RowsAffected()},nil
+	return FeedbackStats{Boosted:boosted,Expired:expiredTag.RowsAffected(),PrunedBuckets:bucketTag.RowsAffected(),PrunedObservations:observationTag.RowsAffected()},nil
 }
