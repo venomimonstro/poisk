@@ -72,6 +72,7 @@ CREATE TABLE mail_items (
     mail_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     mailbox_id BIGINT NOT NULL REFERENCES mailboxes(mailbox_id) ON DELETE RESTRICT,
     message_id BIGINT NOT NULL REFERENCES mail_messages(message_id) ON DELETE RESTRICT,
+    item_role TEXT NOT NULL CHECK (item_role IN ('DRAFT','SENT_COPY','DELIVERY')),
     folder_id BIGINT NOT NULL REFERENCES mail_folders(folder_id) ON DELETE RESTRICT,
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     is_starred BOOLEAN NOT NULL DEFAULT FALSE,
@@ -79,7 +80,7 @@ CREATE TABLE mail_items (
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(mailbox_id,message_id),
+    UNIQUE(mailbox_id,message_id,item_role),
     CHECK ((deleted_at IS NULL) OR trashed_from_kind IS NOT NULL)
 );
 CREATE INDEX idx_mail_items_folder ON mail_items(mailbox_id,folder_id,created_at DESC,mail_item_id DESC);
@@ -120,7 +121,6 @@ CREATE TABLE mail_attachments (
     UNIQUE(message_id,ordinal),
     CHECK (position('/' in original_filename)=0),
     CHECK (position('\\' in original_filename)=0),
-    CHECK (position(chr(0) in original_filename)=0),
     CHECK (original_filename NOT IN ('.','..'))
 );
 
