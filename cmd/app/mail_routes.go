@@ -19,10 +19,10 @@ func internetMailEnabled()bool{v:=strings.ToLower(strings.TrimSpace(os.Getenv("M
 func registerMailRoutes(router chi.Router,apiGuard guard.Middleware,pool *pgxpool.Pool,identityService *identity.Service){
 	root:=strings.TrimSpace(os.Getenv("MAIL_BLOB_DIR"));if root==""{root="/mail-blobs"}
 	repo:=mailcore.Repository{DB:pool};store:=mailcore.AttachmentStore{Repo:repo,Root:root}
-	handler:=mailhttp.Handler{Repo:repo,Store:store,Identity:identityService}
-	router.Mount("/api/mail",apiGuard.Protect(handler.Routes()))
 	internet:=internethttp.Handler{Repo:repo,Identity:identityService,Enabled:internetMailEnabled(),Domain:strings.ToLower(strings.TrimSpace(os.Getenv("MAIL_DOMAIN")))}
 	router.Mount("/api/mail/internet",apiGuard.Protect(internet.Routes()))
+	handler:=mailhttp.Handler{Repo:repo,Store:store,Identity:identityService}
+	router.Mount("/api/mail",apiGuard.Protect(handler.Routes()))
 	gateway:=gatewayhttp.Handler{Repo:repo,Inbound:mailcore.InboundStore{Repo:repo,Root:root},Secret:[]byte(strings.TrimSpace(os.Getenv("MAIL_GATEWAY_SHARED_SECRET"))),Enabled:internetMailEnabled()}
 	router.Mount("/internal/mail-gateway",apiGuard.Protect(gateway.Routes()))
 }
