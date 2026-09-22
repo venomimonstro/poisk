@@ -6,7 +6,8 @@ type User = { user_id: number; email: string; status: string };
 type Site = { site_id: number; domain_id: number; origin: string; host: string; status: string; verified_at?: string; verification_method?: string };
 type Metrics = { impressions: number; clicks: number; answer_citations: number; ctr: number };
 type Challenge = { token: string; instruction: string; verification: { method: string; expires_at: string } };
-
+type Usage = { product: string; paid: boolean; plan_code: string; usage: Record<string, number>; limits: Record<string, number>; period_end?: string };
+type AccountSession = { session_id: number; expires_at: string; last_seen_at: string; created_at: string; revoked_at?: string };
 type ApiError = { error?: string };
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -59,6 +60,8 @@ export default function WebmasterPage() {
   const [urlToSubmit, setUrlToSubmit] = useState("");
   const [urlOperation, setUrlOperation] = useState("SUBMIT");
   const [urlStatus, setUrlStatus] = useState<Record<string, unknown> | null>(null);
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [sessions, setSessions] = useState<AccountSession[]>([]);
 
   const currentSite = useMemo(() => sites.find((site) => site.site_id === selected) || null, [sites, selected]);
 
@@ -74,16 +77,27 @@ export default function WebmasterPage() {
     setSelected((previous) => previous && result.sites?.some((site) => site.site_id === previous) ? previous : result.sites?.[0]?.site_id || null);
   }
 
+  async function loadAccountOverview() {
+    const [usageResult, sessionsResult] = await Promise.all([
+      api<Usage>("/api/portal/webmaster/usage"),
+      api<{ sessions: AccountSession[] }>("/api/account/sessions"),
+    ]);
+    setUsage(usageResult);
+    setSessions(sessionsResult.sessions || []);
+  }
+
   async function bootstrap() {
     try {
       const me = await api<{ user: User }>("/api/account/me");
       setUser(me.user);
       await refreshCsrf();
-      await loadSites();
+      await Promise.all([loadSites(), loadAccountOverview()]);
     } catch {
       setUser(null);
       setCsrf("");
       setSites([]);
+      setUsage(null);
+      setSessions([]);
     }
   }
 
@@ -104,7 +118,7 @@ export default function WebmasterPage() {
       setUser(result.user);
       setCsrf(result.csrf_token);
       setPassword("");
-      await loadSites();
+      await Promise.all([loadSites(), loadAccountOverview()]);
     } catch (e) { setError(messageFor((e as Error).message)); }
     finally { setBusy(false); }
   }
@@ -127,7 +141,7 @@ export default function WebmasterPage() {
     event.preventDefault(); clearMessages(); setBusy(true);
     try {
       const site = await mutation<Site>("/api/portal/webmaster/sites", { origin });
-      setOrigin(""); setNotice("Сайт добавлен"); await loadSites(); setSelected(site.site_id);
+      setOrigin(""); setNotice("Сайт добавлен"); await Promise.all([loadSites(), loadAccountOverview()]); setSelected(site.site_id);
     } catch (e) { setError(messageFor((e as Error).message)); }
     finally { setBusy(false); }
   }
@@ -161,14 +175,14 @@ export default function WebmasterPage() {
 
   async function submitSitemap(event: FormEvent) {
     event.preventDefault(); if (!currentSite) return; clearMessages(); setBusy(true);
-    try { await mutation(`/api/portal/webmaster/sites/${currentSite.site_id}/sitemaps`, { url: sitemap }); setSitemap(""); setNotice("Sitemap принят в обработку"); }
+    try { await mutation(`/api/portal/webmaster/sites/${currentSite.site_id}/sitemaps`, { url: sitemap }); setSitemap(""); setNotice("Sitemap принят в обработку"); await loadAccountOverview(); }
     catch (e) { setError(messageFor((e as Error).message)); }
     finally { setBusy(false); }
   }
 
   async function submitUrl(event: FormEvent) {
     event.preventDefault(); if (!currentSite) return; clearMessages(); setBusy(true);
-    try { await mutation(`/api/portal/webmaster/sites/${currentSite.site_id}/urls`, { url: urlToSubmit, operation: urlOperation }); setNotice("URL принят в обработку"); }
+    try { await mutation(`/api/portal/webmaster/sites/${currentSite.site_id}/urls`, { url: urlToSubmit, operation: urlOperation }); setNotice("URL принят в обработку"); await loadAccountOverview(); }
     catch (e) { setError(messageFor((e as Error).message)); }
     finally { setBusy(false); }
   }
@@ -179,12 +193,23 @@ export default function WebmasterPage() {
     catch (e) { setError(messageFor((e as Error).message)); }
   }
 
+  async function revokeSession(sessionID: number) {
+    clearMessages(); setBusy(true);
+    try {
+      const token = csrf || await refreshCsrf();
+      await api(`/api/account/sessions/${sessionID}/revoke`, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": token }, body: "{}" });
+      try { await loadAccountOverview(); } catch { setUser(null); setSites([]); setSessions([]); }
+      setNotice("Сессия отозвана");
+    } catch (e) { setError(messageFor((e as Error).message)); }
+    finally { setBusy(false); }
+  }
+
   async function logout() {
     clearMessages(); setBusy(true);
     try {
       const token = csrf || await refreshCsrf();
       await api("/api/account/logout", { method: "POST", headers: { "X-CSRF-Token": token } });
-      setUser(null); setSites([]); setCsrf(""); setSelected(null); setMetrics(null); setChallenge(null);
+      setUser(null); setSites([]); setCsrf(""); setSelected(null); setMetrics(null); setChallenge(null); setUsage(null); setSessions([]);
     } catch (e) { setError(messageFor((e as Error).message)); }
     finally { setBusy(false); }
   }
@@ -212,7 +237,7 @@ export default function WebmasterPage() {
   return <main className="wmPage">
     <header className="wmHeader">
       <a className="wmBrand" href="/">Поиск</a>
-      <nav><a href="/">Поиск</a><a href="/map">Карты</a><span>{user.email}</span><button onClick={logout} disabled={busy}>Выйти</button></nav>
+      <nav><a href="/">Поиск</a><a href="/map">Карты</a><a href="/data">Данные</a><span>{user.email}</span><button onClick={logout} disabled={busy}>Выйти</button></nav>
     </header>
     <div className="wmLayout">
       <aside className="wmSidebar">
@@ -227,6 +252,12 @@ export default function WebmasterPage() {
           </button>)}
           {!sites.length && <p className="wmMuted">Добавьте первый сайт.</p>}
         </div>
+        {usage && <div className="wmAccountCard">
+          <strong>{usage.plan_code || "FREE"}</strong>
+          <span>Сайты {sites.length}/{usage.limits.sites ?? 0}</span>
+          <span>Sitemap {usage.usage.sitemaps_month ?? 0}/{usage.limits.sitemaps_month ?? 0}</span>
+          <span>URL {usage.usage.url_requests_month ?? 0}/{usage.limits.url_requests_month ?? 0}</span>
+        </div>}
       </aside>
       <section className="wmContent">
         {error && <div className="wmError">{error}</div>}
@@ -255,6 +286,16 @@ export default function WebmasterPage() {
             {urlStatus && <pre className="wmResult">{JSON.stringify(urlStatus, null, 2)}</pre>}
           </section>
         </>}
+        <section className="wmPanel">
+          <div className="wmPanelHead"><div><h2>Безопасность аккаунта</h2><p>Активные сессии. Неизвестную сессию можно немедленно отозвать.</p></div><button className="wmSecondary" onClick={() => void loadAccountOverview()}>Обновить</button></div>
+          <div className="wmSessions">
+            {sessions.filter((session) => !session.revoked_at).map((session) => <div className="wmSession" key={session.session_id}>
+              <div><strong>Сессия #{session.session_id}</strong><span>Последняя активность: {new Date(session.last_seen_at).toLocaleString("ru-RU")}</span><span>Истекает: {new Date(session.expires_at).toLocaleString("ru-RU")}</span></div>
+              <button className="wmSecondary" disabled={busy} onClick={() => void revokeSession(session.session_id)}>Отозвать</button>
+            </div>)}
+            {!sessions.some((session) => !session.revoked_at) && <p className="wmMuted">Активных сессий нет.</p>}
+          </div>
+        </section>
       </section>
     </div>
   </main>;
