@@ -105,7 +105,7 @@ func normalizeRecipients(items []Recipient)([]Recipient,error){
 	for _,item:=range items{
 		address:=strings.ToLower(strings.TrimSpace(item.Address));kind:=strings.ToUpper(strings.TrimSpace(item.Type));if kind==""{kind="TO"}
 		if address==""||len(address)>320||(kind!="TO"&&kind!="CC"&&kind!="BCC"){return nil,ErrInvalid}
-		key:=kind+"\x00"+address;if _,ok:=seen[key];ok{continue};seen[key]=struct{}{};out=append(out,Recipient{Address:address,Type:kind})
+		if _,ok:=seen[address];ok{continue};seen[address]=struct{}{};out=append(out,Recipient{Address:address,Type:kind})
 	}
 	if len(out)==0||len(out)>maxRecipients{return nil,ErrInvalid}
 	sort.SliceStable(out,func(i,j int)bool{if out[i].Type==out[j].Type{return out[i].Address<out[j].Address};return out[i].Type<out[j].Type})
