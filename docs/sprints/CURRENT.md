@@ -1,57 +1,58 @@
 # CURRENT SPRINT
 
-**Sprint:** 21 — Capacity Gate
+**Sprint:** 22 — Unified Identity + Webmaster Cabinet
 **Status:** IN_PROGRESS
 
 ## Goal
-Проверить фактическую производительность архитектуры на крупном корпусе и сформировать измеряемую модель роста до 10 млн документов. Решения о разделении сервисов, репликах или sharding допускаются только после benchmark и ADR; Sprint 21 не меняет архитектуру заранее.
+Создать единый consumer account/session слой для публичных сервисов Poisk, сохранив Admin как отдельную security boundary, и реализовать полноценный self-service кабинет Webmaster: регистрация/вход, добавление сайта, понятная установка verification proof, проверка владения, sitemap/URL operations, индекс/диагностика и first-party аналитика.
 
 ## Depends On
 - Sprint 00–08 — PASS
-- Sprint 09–16 — PASS (code/static gate where noted in reports)
-- Sprint 17 — PASS (code/static gate)
-- Sprint 18 — PASS (code/static gate)
-- Sprint 19 — PASS (code/static gate)
-- Sprint 20 — PASS (code/static gate; report created)
+- Sprint 09–21 — PASS (code/static gate where noted in reports)
+- commercial runtime/capacity evidence remains an external launch gate and is not considered satisfied by code/static reports
 
 ## Allowed Work
-- benchmark tooling for Search API and direct Manticore retrieval
-- 1M-document benchmark preparation and corpus diagnostics
-- target 10M capacity projection based on measured 1M/current-corpus values
-- QPS, P50/P95/P99, error-rate and timeout measurement
-- CPU/RAM/disk observation and database/index size reporting
-- crawler/extractor/index throughput and queue/outbox backlog measurement
-- Data Hub materialization throughput measurement
-- GEO/address endpoint benchmark
-- capacity snapshots stored as immutable benchmark records
-- explicit thresholds and bottleneck classification
-- ADR generation from measured benchmark results
-- operator commands and runbook for repeatable benchmark execution
-- tests for percentile math, projections, limits and decision rules
+- canonical consumer user identity and compatibility link from existing Webmaster users
+- HttpOnly/Secure/SameSite sessions, CSRF, email verification/reset token primitives
+- session list/revoke and account security events
+- keep `admin_users` fully separate from consumer identities
+- migrate/link Webmaster ownership, agency membership, organization claims and billing ownership without data loss
+- public service navigation/account shell
+- `/webmaster` login/registration/onboarding UI
+- add/normalize a site and show exact DNS TXT / HTML file / META verification instructions
+- check/reissue ownership proof and verification status
+- verified-site dashboard
+- sitemap add/status/error UI
+- URL Submit/Reindex/Delete UI
+- index/crawl diagnostics, robots/canonical/404/500 views
+- impressions/clicks/CTR/Answer citation analytics with bounded date ranges
+- Webmaster Pro entitlement/usage visibility without ranking influence
+- tenant-isolation, CSRF, session and verification tests
 
 ## Forbidden Work
-- automatic architecture migration before benchmark evidence
-- adding Kubernetes, Kafka, RabbitMQ or Redis
-- adding Elasticsearch/OpenSearch
-- speculative Manticore sharding or replicas without ADR
-- benchmark writes against production canonical data without explicit isolated-mode confirmation
-- fabricated benchmark results
-- treating projected 10M numbers as measured values
+- merge Admin auth into consumer auth
+- Maps reviews implementation (Sprint 24)
+- Mail implementation (Sprint 25+)
+- paid organic ranking/crawl priority
+- arbitrary external URLs outside verified Webmaster ownership
+- storing raw passwords/session tokens/reset tokens
+- Redis/Kafka/RabbitMQ/Kubernetes/Elasticsearch/OpenSearch
 - GitHub Actions/CI
 
 ## Definition of Done
-- [ ] repeatable Search benchmark measures QPS, P50/P95/P99 and errors
-- [ ] GEO/address benchmark uses the same bounded benchmark harness
-- [ ] current corpus/document/index/database sizes are captured
-- [ ] crawler/index throughput and crawl/outbox backlog are captured
-- [ ] Data Hub materialization throughput is measurable
-- [ ] 1M-document benchmark workflow is documented and isolated from production canonical state
-- [ ] 10M model clearly distinguishes projection from measured results
-- [ ] benchmark snapshots are immutable and comparable
-- [ ] bottlenecks are classified by CPU/RAM/disk/search/database/queue signals
-- [ ] capacity decision produces an ADR choice: stay single node / move crawler / shard search / add replica
-- [ ] decision rules do not silently change architecture
-- [ ] tests cover percentile calculations, error-rate, projections and decision thresholds
-- [ ] no new infrastructure component is added before ADR
+- [ ] canonical consumer user/session schema exists with compatibility mapping from Webmaster users
+- [ ] Admin remains an isolated authentication realm
+- [ ] session tokens are hashed, bounded, revocable and cookie-safe
+- [ ] CSRF protects cookie-authenticated mutations
+- [ ] existing Webmaster sites/metrics/billing ownership are preserved
+- [ ] new user can register/login and reach `/webmaster`
+- [ ] user can add a site and receive exact ownership instructions
+- [ ] DNS TXT / HTML file / META verification flows are usable from UI
+- [ ] successful verification unlocks sitemap and URL operations
+- [ ] Webmaster UI exposes index/crawl diagnostics and bounded analytics
+- [ ] ownership/tenant isolation is enforced server-side, not only in UI
+- [ ] service navigation links Search / Maps / Webmaster / account; Mail may appear only when implemented
+- [ ] tests cover session isolation, CSRF, ownership verification and cross-tenant access
+- [ ] no Sprint 24+ scope is pulled in
 - [ ] no GitHub Actions/CI added
-- [ ] Sprint 21 report created
+- [ ] Sprint 22 report created
