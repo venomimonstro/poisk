@@ -8,6 +8,7 @@ function allowed(path:string[],method:string){
   if(path.length===1&&path[0]==="me")return method==="GET";
   if(path.length===2&&path[0]==="folders"&&folders.has(path[1].toUpperCase()))return method==="GET";
   if(path.length===2&&path[0]==="items"&&/^\d+$/.test(path[1]))return method==="GET";
+  if(path.length===3&&path[0]==="items"&&/^\d+$/.test(path[1])&&path[2]==="attachments")return method==="GET";
   if(path.length===1&&path[0]==="search")return method==="GET";
   if(path.length===2&&path[0]==="attachments"&&/^\d+$/.test(path[1]))return method==="GET";
   if(path.length===1&&path[0]==="drafts")return method==="POST";
