@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -40,12 +41,16 @@ func lockSendRecipients(ctx context.Context,tx pgx.Tx,messageID int64)([]interna
 	total:=len(internal)+len(external);if total==0||total>maxRecipients{return nil,nil,ErrInvalid};return internal,external,nil
 }
 
-func applySendRecipients(ctx context.Context,tx pgx.Tx,messageID,senderMailboxID int64,internal []internalSendRecipient,external []externalSendRecipient,out *Message) error {
+func applySendRecipients(ctx context.Context,tx pgx.Tx,messageID,senderMailboxID int64,internal []internalSendRecipient,external []externalSendRecipient,out *Message) error{
 	if len(external)>0{
 		var allowed bool
 		if err:=tx.QueryRow(ctx,`SELECT EXISTS(SELECT 1 FROM mail_external_aliases a JOIN mailboxes m ON m.mailbox_id=a.mailbox_id WHERE a.mailbox_id=$1 AND a.is_primary AND a.status='ACTIVE' AND m.status='ACTIVE')`,senderMailboxID).Scan(&allowed);err!=nil{return err};if !allowed{return ErrForbidden}
 	}
+	now:=time.Now().UTC()
 	for _,recipient:=range internal{inboxID,err:=folderID(ctx,tx,recipient.MailboxID,"INBOX");if err!=nil{return err};if _,err=tx.Exec(ctx,`INSERT INTO mail_items(mailbox_id,message_id,item_role,folder_id,is_read) VALUES($1,$2,'DELIVERY',$3,FALSE)`,recipient.MailboxID,messageID,inboxID);err!=nil{return err};out.Recipients=append(out.Recipients,Recipient{Address:recipient.Address,Type:recipient.Kind})}
-	for _,recipient:=range external{key:=outboundIdempotency(messageID,recipient.ID,recipient.Address);var deliveryID int64;err:=tx.QueryRow(ctx,`INSERT INTO mail_outbound_deliveries(message_id,external_recipient_id,sender_mailbox_id,idempotency_key) VALUES($1,$2,$3,$4) ON CONFLICT(external_recipient_id) DO UPDATE SET external_recipient_id=EXCLUDED.external_recipient_id RETURNING delivery_id`,messageID,recipient.ID,senderMailboxID,key).Scan(&deliveryID);if err!=nil{return err};if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt) SELECT $1,'QUEUE',0 WHERE NOT EXISTS(SELECT 1 FROM mail_outbound_events WHERE delivery_id=$1 AND action='QUEUE')`,deliveryID);err!=nil{return err};out.Recipients=append(out.Recipients,Recipient{Address:recipient.Address,Type:recipient.Kind})}
+	for _,recipient:=range external{
+		suppressed,err:=isDeliverySuppressedTx(ctx,tx,senderMailboxID,recipient.Address,now);if err!=nil{return err};if suppressed{return ErrConflict}
+		key:=outboundIdempotency(messageID,recipient.ID,recipient.Address);var deliveryID int64;err=tx.QueryRow(ctx,`INSERT INTO mail_outbound_deliveries(message_id,external_recipient_id,sender_mailbox_id,idempotency_key) VALUES($1,$2,$3,$4) ON CONFLICT(external_recipient_id) DO UPDATE SET external_recipient_id=EXCLUDED.external_recipient_id RETURNING delivery_id`,messageID,recipient.ID,senderMailboxID,key).Scan(&deliveryID);if err!=nil{return err};if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt) SELECT $1,'QUEUE',0 WHERE NOT EXISTS(SELECT 1 FROM mail_outbound_events WHERE delivery_id=$1 AND action='QUEUE')`,deliveryID);err!=nil{return err};out.Recipients=append(out.Recipients,Recipient{Address:recipient.Address,Type:recipient.Kind})
+	}
 	return nil
 }
