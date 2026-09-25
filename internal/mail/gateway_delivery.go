@@ -53,7 +53,14 @@ func (r Repository) ApplyOutboundCallback(ctx context.Context,in OutboundCallbac
 		if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'BOUNCE',$2,jsonb_build_object('remote_queue_id',NULLIF($3,''),'code',NULLIF($4,''),'class',$5))`,in.DeliveryID,attempt,in.RemoteQueueID,in.Code,string(failureClass));err!=nil{return false,err}
 		if failureClass==FailureHard{
 			created,recordErr:=recordHardBounceTx(ctx,tx,mailboxID,address,now);if recordErr!=nil{return false,recordErr}
-			if created{if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'SUPPRESS',$2,jsonb_build_object('reason','HARD_BOUNCE','ttl_days',30))`,in.DeliveryID,attempt);err!=nil{return false,err}}
+			if created{
+				if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'SUPPRESS',$2,jsonb_build_object('reason','HARD_BOUNCE','ttl_days',30))`,in.DeliveryID,attempt);err!=nil{return false,err}
+				rows,qErr:=tx.Query(ctx,`UPDATE mail_outbound_deliveries d SET status='DEAD',last_error_code='RECIPIENT_SUPPRESSED',last_error_detail=NULL,updated_at=$3
+ FROM mail_external_recipients r WHERE d.external_recipient_id=r.external_recipient_id AND d.sender_mailbox_id=$1 AND lower(r.address)=lower($2)
+ AND d.status IN ('READY','RETRY') RETURNING d.delivery_id,d.attempts`,mailboxID,address,now);if qErr!=nil{return false,qErr}
+				type deadRow struct{id int64;attempt int};dead:=[]deadRow{};for rows.Next(){var x deadRow;if qErr=rows.Scan(&x.id,&x.attempt);qErr!=nil{rows.Close();return false,qErr};dead=append(dead,x)};if qErr=rows.Err();qErr!=nil{rows.Close();return false,qErr};rows.Close()
+				for _,x:=range dead{if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'DEAD',$2,jsonb_build_object('code','RECIPIENT_SUPPRESSED'))`,x.id,x.attempt);err!=nil{return false,err}}
+			}
 		}
 	}
 	if _,err=tx.Exec(ctx,`INSERT INTO mail_gateway_events(direction,event_type,message_id,delivery_id,mailbox_id,code,source_event_id,details) VALUES('OUTBOUND',$1,$2,$3,$4,NULLIF($5,''),$6,jsonb_build_object('remote_queue_id',NULLIF($7,''),'detail',NULLIF($8,''),'failure_class',$9))`,in.Type,messageID,in.DeliveryID,mailboxID,in.Code,in.SourceEventID,in.RemoteQueueID,in.Detail,string(failureClass));err!=nil{return false,err}
