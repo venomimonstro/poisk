@@ -1,0 +1,56 @@
+# Example only. Replace example values during deployment.
+# Public SMTP is owned by the MTA boundary, never by the Go application.
+
+compatibility_level = 3.6
+myhostname = mail.example.com
+mydomain = example.com
+myorigin = $mydomain
+
+inet_interfaces = all
+inet_protocols = all
+
+# Do not treat the public mail domain as a local catch-all destination.
+mydestination = $myhostname, localhost.$mydomain, localhost
+virtual_mailbox_domains = $mydomain
+
+# The MTA bridge must expose a recipient map adapter that returns a mailbox
+# only after /internal/mail-gateway/recipient confirms an ACTIVE local identity.
+# Adapt the socket/protocol to the chosen bridge implementation.
+virtual_mailbox_maps = socketmap:unix:/run/poisk/recipient-map.sock:mailbox
+
+# Only the local/private bridge may inject relay mail. Never place public or
+# broad RFC1918 ranges here unless the network is strictly dedicated to the bridge.
+mynetworks = 127.0.0.0/8, [::1]/128
+
+# Critical anti-open-relay boundary.
+smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+smtpd_recipient_restrictions = reject_unauth_destination
+smtpd_helo_required = yes
+
+# Bound SMTP resource consumption before application MIME parsing.
+message_size_limit = 26214400
+mailbox_size_limit = 0
+smtpd_recipient_limit = 50
+smtpd_client_connection_rate_limit = 30
+smtpd_client_message_rate_limit = 60
+
+# TLS belongs at the MTA boundary. Mount certificate/key files as secrets.
+smtpd_tls_security_level = may
+smtp_tls_security_level = may
+smtpd_tls_cert_file = /run/secrets/mail_tls_cert
+smtpd_tls_key_file = /run/secrets/mail_tls_key
+smtpd_tls_loglevel = 1
+
+# DKIM signing should be connected through a local milter/signing service.
+# The private key must be mounted outside the repository/DB/browser.
+smtpd_milters = unix:/run/opendkim/opendkim.sock
+non_smtpd_milters = unix:/run/opendkim/opendkim.sock
+milter_default_action = tempfail
+milter_protocol = 6
+
+# Do not expose SMTP AUTH for the application contract; application outbound
+# submission happens through the private signed MTA bridge, not browser SMTP.
+smtpd_sasl_auth_enable = no
+
+# Privacy: no recipient/body data should be copied into application logs by config.
+disable_vrfy_command = yes
