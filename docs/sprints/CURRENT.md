@@ -1,7 +1,7 @@
 # CURRENT SPRINT
 
 **Sprint:** 28 — Security & Commercial Readiness Gate
-**Status:** IN_PROGRESS
+**Status:** IN_PROGRESS — CODE/STATIC PASS, RUNTIME_GATE_PENDING
 
 ## Goal
 Провести финальный логический, security и operational аудит всего продукта перед коммерческим использованием. Исправить P0/P1 проблемы, доказать tenant isolation, auth/session/CSRF/SSRF/file/mail boundaries, migration safety, recovery/capacity readiness и сформировать честный launch verdict на основании runtime evidence, а не только наличия кода.
@@ -27,26 +27,33 @@
 7. Browser smoke matrix and commercial launch checklist.
 
 ## Definition of Done
-- [ ] no unresolved known P0/P1 security or data-integrity defects
-- [ ] public/backend proxy routes are explicit and cannot become generic internal API tunnels
-- [ ] auth cookies are HttpOnly/SameSite and Secure outside local/dev/test
-- [ ] browser mutations require CSRF; machine callbacks require bounded signed auth + replay protection
-- [ ] tenant isolation regression tests cover Webmaster, Mail, Reviews, Billing/Claims critical paths
-- [ ] crawler/Webmaster external fetches revalidate DNS/IP after redirects and block private/metadata targets
-- [ ] attachment/blob paths cannot traverse storage root and downloads use safe response headers
-- [ ] Admin VIEWER/ANALYST cannot mutate; destructive OPERATOR/SUPERADMIN actions use preview/apply where required
-- [ ] secrets/private keys/raw credentials are absent from user-visible diagnostics and routine logs
-- [ ] migration versions are unique and upgrade-safe
-- [ ] full build + unit tests have verified runtime evidence
-- [ ] integration tests have verified runtime evidence against migrated PostgreSQL
-- [ ] fresh install and previous-schema upgrade are verified
-- [ ] browser smoke tests cover Search, Account, Webmaster, Maps/Reviews, Mail and Admin
-- [ ] real Capacity benchmark/snapshot is available
-- [ ] current-schema BACKUP and RESTORE drills are PASS
+- [x] no unresolved **known code/static** P0/P1 security or data-integrity defects remain after Sprint 28 audit
+- [x] public/backend proxy routes are explicit and cannot become generic internal API tunnels
+- [x] auth cookies are HttpOnly/SameSite and Secure outside local/dev/test
+- [x] browser mutations require CSRF; machine callbacks require bounded signed auth + replay protection
+- [x] tenant isolation regression tests exist for Webmaster, Mail, Reviews, Billing/Claims critical paths
+- [x] crawler/Webmaster external fetches revalidate DNS/IP after redirects and block private/metadata targets
+- [x] attachment/blob paths cannot traverse storage root and downloads use safe response headers
+- [x] Admin VIEWER/ANALYST cannot mutate; destructive OPERATOR/SUPERADMIN actions use preview/apply where required
+- [x] secrets/private keys/raw credentials are absent from user-visible diagnostics and routine diagnostic responses audited in Sprint 28
+- [x] migration versions are duplicate-protected; launch gate validates the exact repository/applied migration set
+- [ ] full build + unit tests have verified runtime evidence for the exact release commit/schema
+- [ ] integration/security tests have verified runtime evidence against migrated PostgreSQL
+- [ ] fresh install and previous-schema upgrade are verified for the exact release candidate
+- [ ] browser smoke tests cover Search, Account, Webmaster, Maps/Reviews, Mail and Admin through the real HTTPS edge
+- [ ] real Capacity `ISOLATED_1M` benchmark/snapshot + ADR is available and fresh
+- [ ] current-schema BACKUP and RESTORE drills are PASS and fresh
 - [ ] Internet Mail DNS/MTA/suppression/callback flow is verified when Internet Mail is enabled
-- [ ] incident/recovery/security runbook is updated
-- [ ] final commercial-readiness report states exact blockers and does not convert missing evidence into PASS
-- [ ] no GitHub Actions / CI is added
+- [x] incident/recovery/security runbook is updated
+- [x] commercial-readiness report states exact blockers and does not convert missing evidence into PASS
+- [x] immutable readiness evidence + fail-closed `readinessctl check` are implemented
+- [x] no GitHub Actions / CI is added
+
+## Current Launch Verdict
+
+**COMMERCIAL READY: NO.**
+
+Code/static gate is PASS, but runtime evidence is intentionally not inferred. The exact release commit must record BUILD_UNIT, INTEGRATION, FRESH_INSTALL, UPGRADE, BROWSER_SMOKE, SECURITY_REGRESSION and EDGE_TLS_PROXY evidence for the current schema. Internet Mail additionally requires MTA_FLOW plus fresh DNS readiness for the configured domain/selector. Quality, Capacity, BACKUP/RESTORE and resource-pressure checks must also pass. Only `readinessctl check` returning `ready=true` changes this verdict.
 
 ## Forbidden Work
 - new product verticals while this gate is open
