@@ -5,7 +5,7 @@ ALTER TABLE commercial_readiness_evidence
     ADD CONSTRAINT commercial_readiness_evidence_release_version_check
     CHECK (
         release_version IS NULL OR
-        (length(release_version) BETWEEN 1 AND 120 AND release_version !~ '[[:cntrl:]]')
+        (length(release_version) BETWEEN 1 AND 128 AND release_version !~ '[[:cntrl:]]')
     );
 
 CREATE INDEX idx_commercial_readiness_release_latest
