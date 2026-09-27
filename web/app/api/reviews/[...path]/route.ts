@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ProxyBodyTooLarge, readLimitedProxyBody } from "../../_proxyBody";
 
 const internalBase=(process.env.API_INTERNAL_BASE_URL||"http://localhost:8080").replace(/\/$/,"");
+const maxBodyBytes=32*1024;
 
 function allowed(path:string[],method:string){
   if(path.length===3&&path[0]==="places"&&/^\d+$/.test(path[1])&&path[2]==="reviews")return method==="GET";
@@ -21,10 +23,10 @@ async function proxy(request:NextRequest,path:string[]){
     const headers=new Headers({Accept:"application/json"});
     const cookie=request.headers.get("cookie");const csrf=request.headers.get("x-csrf-token");const contentType=request.headers.get("content-type");
     if(cookie)headers.set("Cookie",cookie);if(csrf)headers.set("X-CSRF-Token",csrf);if(contentType)headers.set("Content-Type",contentType);
-    const suffix=request.nextUrl.search||"";const body=["GET","HEAD"].includes(request.method)?undefined:await request.text();
+    const suffix=request.nextUrl.search||"";const body=["GET","HEAD","DELETE"].includes(request.method)?undefined:await readLimitedProxyBody(request,maxBodyBytes);
     const upstream=await fetch(`${internalBase}/api/reviews/${path.join("/")}${suffix}`,{method:request.method,headers,body,cache:"no-store",redirect:"manual",signal:controller.signal});
     const text=await upstream.text();return new NextResponse(text||null,{status:upstream.status,headers:{"Content-Type":upstream.headers.get("Content-Type")||"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
-  }catch{return NextResponse.json({error:"reviews_backend_error"},{status:502})}finally{clearTimeout(timer)}
+  }catch(error){if(error instanceof ProxyBodyTooLarge)return NextResponse.json({error:"body_too_large"},{status:413});return NextResponse.json({error:"reviews_backend_error"},{status:502})}finally{clearTimeout(timer)}
 }
 
 export async function GET(request:NextRequest,context:{params:Promise<{path:string[]}>}){return proxy(request,(await context.params).path||[])}
