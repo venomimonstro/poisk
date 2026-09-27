@@ -30,6 +30,7 @@ func qualityInputSHA256(data []byte)string{sum:=sha256.Sum256(data);return hex.E
 
 func runQualityWithHistory(cfg config.Config,pool *pgxpool.Pool) error {
 	commit,err:=capacityBenchmarkCommit();if err!=nil{return fmt.Errorf("quality release binding: %w",err)}
+	releaseVersion,err:=capacityBenchmarkReleaseVersion();if err!=nil{return fmt.Errorf("quality candidate binding: %w",err)}
 	databaseSchema,err:=capacity.NewRepository(pool).CurrentSchema(context.Background());if err!=nil{return fmt.Errorf("quality database schema: %w",err)}
 	goldenPath:=os.Getenv("QUALITY_GOLDEN_PATH");if goldenPath==""{goldenPath="/app/docs/quality/golden.seed.json"}
 	thresholdPath:=os.Getenv("QUALITY_THRESHOLDS_PATH");if thresholdPath==""{thresholdPath="/app/docs/quality/thresholds.json"}
@@ -39,6 +40,6 @@ func runQualityWithHistory(cfg config.Config,pool *pgxpool.Pool) error {
 	backend,err:=searchbackend.New(searchbackend.Config{BaseURL:fmt.Sprintf("http://%s:%d",cfg.ManticoreHost,cfg.ManticoreHTTPPort)});if err!=nil{return fmt.Errorf("create quality search backend: %w",err)}
 	service:=&searchsvc.Service{Backend:backend,BackendConcurrency:make(chan struct{},cfg.BackendConcurrent)};ctx,cancel:=context.WithTimeout(context.Background(),10*time.Minute);defer cancel()
 	report,err:=quality.EvaluateGolden(ctx,service,golden);if err!=nil{return err};gate:=quality.CheckGate(report.Summary,thresholds)
-	if _,err:= (quality.HistoryRepository{DB:pool}).RecordReleaseBound(ctx,report,thresholds,gate,"app-quality",commit,databaseSchema,goldenHash,thresholdHash);err!=nil{return fmt.Errorf("persist quality report: %w",err)}
-	output:=struct{Report quality.Report `json:"report"`;Thresholds quality.Thresholds `json:"thresholds"`;Gate quality.GateResult `json:"gate"`;GitCommit string `json:"git_commit"`;DatabaseSchema int64 `json:"database_schema"`;GoldenSHA256 string `json:"golden_sha256"`;ThresholdsSHA256 string `json:"thresholds_sha256"`}{report,thresholds,gate,commit,databaseSchema,goldenHash,thresholdHash};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err:=enc.Encode(output);err!=nil{return fmt.Errorf("encode quality report: %w",err)};if !gate.Pass{return errors.New("search quality gate failed")};return nil
+	if _,err:= (quality.HistoryRepository{DB:pool}).RecordReleaseBound(ctx,report,thresholds,gate,"app-quality",commit,releaseVersion,databaseSchema,goldenHash,thresholdHash);err!=nil{return fmt.Errorf("persist quality report: %w",err)}
+	output:=struct{Report quality.Report `json:"report"`;Thresholds quality.Thresholds `json:"thresholds"`;Gate quality.GateResult `json:"gate"`;GitCommit string `json:"git_commit"`;ReleaseVersion string `json:"release_version"`;DatabaseSchema int64 `json:"database_schema"`;GoldenSHA256 string `json:"golden_sha256"`;ThresholdsSHA256 string `json:"thresholds_sha256"`}{report,thresholds,gate,commit,releaseVersion,databaseSchema,goldenHash,thresholdHash};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err:=enc.Encode(output);err!=nil{return fmt.Errorf("encode quality report: %w",err)};if !gate.Pass{return errors.New("search quality gate failed")};return nil
 }
