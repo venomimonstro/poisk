@@ -52,8 +52,19 @@ func (r Repository) LeaseOutbound(ctx context.Context,worker string,limit int,le
 UPDATE mail_outbound_deliveries d SET status='LEASED',lease_owner=$3,lease_until=$1+make_interval(secs => $4),attempts=d.attempts+1,updated_at=$1
 FROM picked p WHERE d.delivery_id=p.delivery_id
 RETURNING d.delivery_id,d.message_id,d.external_recipient_id,d.sender_mailbox_id,d.status,d.attempts,d.idempotency_key,d.lease_owner,d.lease_until`,now,limit,worker,leaseSeconds);if err!=nil{return nil,err}
-	out:=[]OutboundDelivery{};for rows.Next(){var d OutboundDelivery;if err=rows.Scan(&d.ID,&d.MessageID,&d.ExternalRecipientID,&d.SenderMailboxID,&d.Status,&d.Attempts,&d.IdempotencyKey,&d.LeaseOwner,&d.LeaseUntil);err!=nil{rows.Close();return nil,err};out=append(out,d)};if err=rows.Err();err!=nil{rows.Close();return nil,err};rows.Close()
-	for i:=range out{if err=tx.QueryRow(ctx,`SELECT address,recipient_type FROM mail_external_recipients WHERE external_recipient_id=$1`,out[i].ExternalRecipientID).Scan(&out[i].Address,&out[i].RecipientType);err!=nil{return nil,err};if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'LEASE',$2,jsonb_build_object('worker',$3))`,out[i].ID,out[i].Attempts,worker);err!=nil{return nil,err}}
+	picked:=[]OutboundDelivery{};for rows.Next(){var d OutboundDelivery;if err=rows.Scan(&d.ID,&d.MessageID,&d.ExternalRecipientID,&d.SenderMailboxID,&d.Status,&d.Attempts,&d.IdempotencyKey,&d.LeaseOwner,&d.LeaseUntil);err!=nil{rows.Close();return nil,err};picked=append(picked,d)};if err=rows.Err();err!=nil{rows.Close();return nil,err};rows.Close()
+	out:=make([]OutboundDelivery,0,len(picked))
+	for _,d:=range picked{
+		if err=tx.QueryRow(ctx,`SELECT address,recipient_type FROM mail_external_recipients WHERE external_recipient_id=$1`,d.ExternalRecipientID).Scan(&d.Address,&d.RecipientType);err!=nil{return nil,err}
+		suppressed,suppressErr:=isDeliverySuppressedTx(ctx,tx,d.SenderMailboxID,d.Address,now);if suppressErr!=nil{return nil,suppressErr}
+		if suppressed{
+			if _,err=tx.Exec(ctx,`UPDATE mail_outbound_deliveries SET status='DEAD',lease_owner=NULL,lease_until=NULL,last_error_code='RECIPIENT_SUPPRESSED',last_error_detail=NULL,updated_at=$2 WHERE delivery_id=$1 AND status='LEASED' AND lease_owner=$3`,d.ID,now,worker);err!=nil{return nil,err}
+			if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'SUPPRESS',$2,jsonb_build_object('reason','ACTIVE_SUPPRESSION'))`,d.ID,d.Attempts);err!=nil{return nil,err}
+			if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'DEAD',$2,jsonb_build_object('code','RECIPIENT_SUPPRESSED'))`,d.ID,d.Attempts);err!=nil{return nil,err}
+			continue
+		}
+		if _,err=tx.Exec(ctx,`INSERT INTO mail_outbound_events(delivery_id,action,attempt,details) VALUES($1,'LEASE',$2,jsonb_build_object('worker',$3))`,d.ID,d.Attempts,worker);err!=nil{return nil,err};out=append(out,d)
+	}
 	if err=tx.Commit(ctx);err!=nil{return nil,err};return out,nil
 }
 
