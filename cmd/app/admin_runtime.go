@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -21,13 +23,21 @@ func newAdminService(pool *pgxpool.Pool)(*admin.Service,error){
 	box,err:=admin.NewSecretBox(key);if err!=nil{return nil,err};return &admin.Service{Store:admin.NewRepository(pool),Secrets:box,SessionTTL:12*time.Hour},nil
 }
 
+func readAdminPassword(r io.Reader)(string,error){
+	if r==nil{return "",errors.New("admin password stdin is required")}
+	s:=bufio.NewScanner(io.LimitReader(r,4097));s.Buffer(make([]byte,128),4097)
+	if !s.Scan(){if err:=s.Err();err!=nil{return "",err};return "",errors.New("admin password stdin is required")}
+	password:=strings.TrimSpace(s.Text());if len(password)<12||len(password)>4096{return "",errors.New("admin password must be between 12 and 4096 bytes")}
+	if s.Scan(){return "",errors.New("admin password input must contain exactly one line")};if err:=s.Err();err!=nil{return "",err};return password,nil
+}
+
 func runAdminCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
-	if len(args)==0{return errors.New("usage: adminctl create|setup-2fa|revoke-sessions")}
+	if len(args)==0{return errors.New("usage: adminctl create <email> <role> (password from stdin) | setup-2fa|revoke-sessions")}
 	service,err:=newAdminService(pool);if err!=nil{return err}
 	switch args[0]{
 	case "create":
-		if len(args)!=4{return errors.New("usage: adminctl create <email> <role> <password>")}
-		hash,err:=admin.HashPassword(args[3],admin.DefaultArgonParams());if err!=nil{return err};created,err:=service.Store.CreateAdmin(ctx,args[1],hash,args[2]);if err!=nil{return err};return json.NewEncoder(os.Stdout).Encode(map[string]any{"admin_id":created.ID,"email":created.Email,"role":created.Role})
+		if len(args)!=3{return errors.New("usage: adminctl create <email> <role> (password from stdin)")}
+		password,err:=readAdminPassword(os.Stdin);if err!=nil{return err};hash,err:=admin.HashPassword(password,admin.DefaultArgonParams());password="";if err!=nil{return err};created,err:=service.Store.CreateAdmin(ctx,args[1],hash,args[2]);if err!=nil{return err};return json.NewEncoder(os.Stdout).Encode(map[string]any{"admin_id":created.ID,"email":created.Email,"role":created.Role})
 	case "setup-2fa":
 		if len(args)!=2{return errors.New("usage: adminctl setup-2fa <admin-id>")};id,err:=strconv.ParseInt(args[1],10,64);if err!=nil||id<=0{return errors.New("invalid admin id")};secret,codes,err:=service.SetupTOTP(ctx,id);if err!=nil{return err};return json.NewEncoder(os.Stdout).Encode(map[string]any{"admin_id":id,"totp_secret":secret,"recovery_codes":codes,"warning":"shown once; store securely"})
 	case "revoke-sessions":
