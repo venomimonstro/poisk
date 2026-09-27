@@ -12,7 +12,7 @@ import (
 	"github.com/venomimonstro/poisk/internal/platform/guard"
 )
 
-func registerAdminRoutes(router chi.Router,apiGuard guard.Middleware,cfg config.Config,pool *pgxpool.Pool)error{
+func registerAdminRoutes(router chi.Router,apiGuard guard.Middleware,pool *pgxpool.Pool)error{
 	secureCookies:=browserSecureCookies(os.Getenv("APP_ENV"))
 	service,err:=newAdminService(pool)
 	if err!=nil{
@@ -21,12 +21,19 @@ func registerAdminRoutes(router chi.Router,apiGuard guard.Middleware,cfg config.
 		router.Mount("/api/admin",apiGuard.Protect(handler.Routes()))
 		return nil
 	}
+	var readinessReader adminhttp.ReadinessReader
+	cfg,cfgErr:=config.Load()
+	if cfgErr!=nil{
+		slog.Warn("admin readiness view disabled; fail-closed", "reason", cfgErr.Error())
+	}else{
+		readinessReader=adminReadinessReader{db:pool,cfg:cfg}
+	}
 	handler:=adminhttp.Handler{
 		Service:service,
 		Ops:admin.OpsRepository{DB:pool},
 		Owner:admin.OwnerRepository{DB:pool},
 		Diagnostics:admin.DiagnosticsRepository{DB:pool},
-		Readiness:adminReadinessReader{db:pool,cfg:cfg},
+		Readiness:readinessReader,
 		SecureCookies:secureCookies,
 	}
 	router.Mount("/api/admin",apiGuard.Protect(handler.Routes()))
