@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -70,8 +69,8 @@ func (s Service) MailGatewayHealth(ctx context.Context,session Session)(MailGate
  (SELECT count(*) FROM mail_delivery_suppressions WHERE status='ACTIVE' AND suppressed_until>now()),
  (SELECT count(*) FROM mail_domain_delivery_pressure WHERE cooldown_until>now())
  FROM mail_gateway_events`).Scan(&out.Inbound24h,&out.Delivered24h,&out.Bounced24h,&out.Dead24h,&out.ReplayGuardRows,&out.InboundReceiptsProcessing,&out.ActiveSuppressions,&out.CoolingDomains);err!=nil{return MailGatewayHealth{},err}
-	var dns MailDNSHealth;var reasonsJSON []byte
-	err=s.Store.db.QueryRow(ctx,`SELECT domain,selector,mx_ok,spf_ok,dmarc_ok,dkim_ok,ready,drift,reasons,checked_at FROM mail_dns_readiness_snapshots ORDER BY checked_at DESC,snapshot_id DESC LIMIT 1`).Scan(&dns.Domain,&dns.Selector,&dns.MX,&dns.SPF,&dns.DMARC,&dns.DKIM,&dns.Ready,&dns.Drift,&reasonsJSON,&dns.CheckedAt)
-	if err==nil{if len(reasonsJSON)>0{if decodeErr:=json.Unmarshal(reasonsJSON,&dns.Reasons);decodeErr!=nil{return MailGatewayHealth{},decodeErr}};out.DNS=&dns}else if !errors.Is(err,pgx.ErrNoRows){return MailGatewayHealth{},err}
+	var dns MailDNSHealth
+	err=s.Store.db.QueryRow(ctx,`SELECT domain,selector,mx_ok,spf_ok,dmarc_ok,dkim_ok,ready,drift,reasons,checked_at FROM mail_dns_readiness_snapshots ORDER BY checked_at DESC,snapshot_id DESC LIMIT 1`).Scan(&dns.Domain,&dns.Selector,&dns.MX,&dns.SPF,&dns.DMARC,&dns.DKIM,&dns.Ready,&dns.Drift,&dns.Reasons,&dns.CheckedAt)
+	if err==nil{out.DNS=&dns}else if !errors.Is(err,pgx.ErrNoRows){return MailGatewayHealth{},err}
 	out.MeasuredAt=time.Now().UTC();return out,nil
 }
