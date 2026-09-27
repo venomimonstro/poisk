@@ -65,7 +65,7 @@ func (g Gate) Evaluate(ctx context.Context) (Report, error) {
 	}
 
 	qualityPass,qualityDetail,err:=g.quality(ctx,now);if err!=nil{return Report{},err};add("quality_gate",qualityPass,qualityDetail)
-	capacityPass,capacityDetail,err:=g.capacity(ctx,now);if err!=nil{return Report{},err};add("capacity_1m",capacityPass,capacityDetail)
+	capacityPass,capacityDetail,err:=g.capacity(ctx,now,report.ExpectedSchema);if err!=nil{return Report{},err};add("capacity_1m",capacityPass,capacityDetail)
 	backupPass,backupDetail,err:=g.recovery(ctx,"BACKUP",report.ExpectedSchema,now);if err!=nil{return Report{},err};add("recovery_backup",backupPass,backupDetail)
 	restorePass,restoreDetail,err:=g.recovery(ctx,"RESTORE",report.ExpectedSchema,now);if err!=nil{return Report{},err};add("recovery_restore",restorePass,restoreDetail)
 	pressurePass,pressureDetail,err:=g.resourcePressure(ctx,now);if err!=nil{return Report{},err};add("resource_pressure",pressurePass,pressureDetail)
@@ -110,11 +110,17 @@ func (g Gate) quality(ctx context.Context,now time.Time)(bool,string,error){
 	return pass&&fresh,fmt.Sprintf("pass=%v fresh_7d=%v completed_at=%s failures=%v",pass,fresh,completed.UTC().Format(time.RFC3339),failures),nil
 }
 
-func (g Gate) capacity(ctx context.Context,now time.Time)(bool,string,error){
-	var runID,snapshotID,measured int64;var completed time.Time;var hasADR bool
-	err:=g.DB.QueryRow(ctx,`SELECT r.run_id,s.snapshot_id,s.measured_documents,r.completed_at,EXISTS(SELECT 1 FROM capacity_adr_decisions a WHERE a.snapshot_id=s.snapshot_id) FROM capacity_benchmark_runs r JOIN capacity_snapshots s ON s.run_id=r.run_id WHERE r.status='COMPLETED' AND r.mode='ISOLATED_1M' AND s.measured_documents>=1000000 ORDER BY r.completed_at DESC,r.run_id DESC LIMIT 1`).Scan(&runID,&snapshotID,&measured,&completed,&hasADR)
-	if errors.Is(err,pgx.ErrNoRows){return false,"no completed ISOLATED_1M snapshot with >=1,000,000 documents",nil};if err!=nil{return false,"",err}
-	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute));return hasADR&&fresh,fmt.Sprintf("run_id=%d snapshot_id=%d measured=%d adr=%v fresh_30d=%v completed_at=%s",runID,snapshotID,measured,hasADR,fresh,completed.UTC().Format(time.RFC3339)),nil
+func (g Gate) capacity(ctx context.Context,now time.Time,schema int64)(bool,string,error){
+	var runID,snapshotID,measured int64;var completed time.Time;var hasADR bool;var commit,recordedSchema string
+	err:=g.DB.QueryRow(ctx,`SELECT r.run_id,s.snapshot_id,s.measured_documents,r.completed_at,
+EXISTS(SELECT 1 FROM capacity_adr_decisions a WHERE a.snapshot_id=s.snapshot_id),
+COALESCE(r.config->>'git_commit',''),COALESCE(r.config->>'database_schema','')
+FROM capacity_benchmark_runs r JOIN capacity_snapshots s ON s.run_id=r.run_id
+WHERE r.status='COMPLETED' AND r.mode='ISOLATED_1M' AND s.measured_documents>=1000000
+AND r.config->>'git_commit'=$1 AND r.config->>'database_schema'=$2
+ORDER BY r.completed_at DESC,r.run_id DESC LIMIT 1`,g.GitCommit,fmt.Sprint(schema)).Scan(&runID,&snapshotID,&measured,&completed,&hasADR,&commit,&recordedSchema)
+	if errors.Is(err,pgx.ErrNoRows){return false,"no completed ISOLATED_1M snapshot for current commit/schema with >=1,000,000 documents",nil};if err!=nil{return false,"",err}
+	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute));return hasADR&&fresh,fmt.Sprintf("run_id=%d snapshot_id=%d measured=%d commit=%s schema=%s adr=%v fresh_30d=%v completed_at=%s",runID,snapshotID,measured,commit,recordedSchema,hasADR,fresh,completed.UTC().Format(time.RFC3339)),nil
 }
 
 func (g Gate) recovery(ctx context.Context,kind string,schema int64,now time.Time)(bool,string,error){
