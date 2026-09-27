@@ -58,9 +58,7 @@ record_evidence() {
     echo "POSTGRES_DSN is required when READINESS_RECORD=1" >&2
     return 2
   }
-  local digest
-  digest="$(sha256_file "$artifact")"
-  "$APP_BIN" readinessctl record "$kind" PASS "$artifact" "$digest" "$actor" '{"runner":"scripts/release_candidate_gate.sh"}'
+  "$APP_BIN" readinessctl record-file "$kind" PASS "$artifact" "$actor" '{"runner":"scripts/release_candidate_gate.sh"}'
 }
 
 BUILD_LOG="$ARTIFACT_ROOT/build-unit.log"
