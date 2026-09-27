@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -11,7 +12,7 @@ import (
 )
 
 func registerAdminRoutes(router chi.Router,apiGuard guard.Middleware,pool *pgxpool.Pool)error{
-	secureCookies:=browserSecureCookies(envDefault("APP_ENV","development"))
+	secureCookies:=browserSecureCookies(os.Getenv("APP_ENV"))
 	service,err:=newAdminService(pool)
 	if err!=nil{
 		slog.Warn("admin API disabled; fail-closed", "reason", err.Error())
