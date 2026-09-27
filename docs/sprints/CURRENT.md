@@ -1,64 +1,58 @@
 # CURRENT SPRINT
 
-**Sprint:** 27 — Mail Deliverability Operations
+**Sprint:** 28 — Security & Commercial Readiness Gate
 **Status:** IN_PROGRESS
 
 ## Goal
-Сделать Internet Mail эксплуатационно устойчивой после Sprint 26: подавлять заведомо недоставляемые адреса, безопасно управлять dead-letter/retry, ограничивать деградацию по доменам и обнаруживать DNS drift — без хранения raw bounce bodies и без добавления новых почтовых протоколов/инфраструктуры.
+Провести финальный логический, security и operational аудит всего продукта перед коммерческим использованием. Исправить P0/P1 проблемы, доказать tenant isolation, auth/session/CSRF/SSRF/file/mail boundaries, migration safety, recovery/capacity readiness и сформировать честный launch verdict на основании runtime evidence, а не только наличия кода.
 
 ## Depends On
-- Sprint 00–25 — PASS (code/static gate where noted in reports)
-- Sprint 26 — PASS code/static gate; live MTA/DNS/browser/integration evidence remains external launch gate
+- Sprint 00–26 — PASS (code/static gate where noted in reports)
+- Sprint 27 — PASS code/static gate; runtime/integration/DNS/MTA evidence remains external launch gate
 
 ## Architecture Boundary
-- PostgreSQL остаётся source of truth для deliverability state, suppression, dead-letter и operational aggregates.
-- Sprint 26 MTA boundary остаётся единственной публичной SMTP-границей; Go application по-прежнему не слушает public SMTP.
-- Suppression относится только к точному canonical external recipient внутри tenant/user boundary и не превращается в глобальный пользовательский blacklist.
-- Bounce diagnostics хранятся как bounded classification/code/metadata; raw DSN/bounce body не является canonical data.
-- Backpressure и retry работают через существующий PostgreSQL queue, без Redis/Kafka/RabbitMQ.
+- Текущий stack, modular monolith и PostgreSQL source-of-truth сохраняются.
+- Новые product verticals, ranking factors, queue systems и infrastructure platforms запрещены.
+- Security fixes используют существующие auth/RBAC/preview/apply/audit/guard patterns.
+- Commercial READY разрешён только при подтверждённых build/test/migration/recovery/capacity/browser/MTA evidence.
+- Code/static PASS не равен production PASS.
 
-## Allowed Work
-- deterministic hard-bounce vs transient-failure classification from bounded MTA callback metadata
-- per-user exact-recipient suppression with reason, counters, timestamps, expiry/manual clear
-- suppression check before external enqueue/lease/submission
-- bounded automatic suppression after repeated hard bounces
-- safe dead-letter inspection/retry with tenant/operator authorization and no body exposure
-- PostgreSQL-backed per-domain backpressure/cooldown based on aggregate failures
-- bounded retry-after/domain cooldown integration in `mail-gateway-worker`
-- periodic MX/SPF/DMARC/DKIM readiness snapshots and DNS drift status
-- aggregate deliverability metrics: submitted/delivered/bounced/retry/dead/suppressed
-- replay/event retention maintenance with explicit bounded windows
-- idempotent reconciliation for stale `SUBMITTED` deliveries
-- tests for suppression isolation/idempotency, hard/transient classification, cooldown bounds, retry safety and retention
-- operator runbook/rollback documentation
-
-## Forbidden Work
-- IMAP/POP3 server/client implementation
-- custom public SMTP server in the Go application
-- bulk/marketing campaign sender, purchased lists or unsolicited-mail tooling
-- wildcard forwarding, open relay or user-selectable MTA/SMTP credentials
-- storing raw bounce bodies, SMTP credentials or DKIM private keys in PostgreSQL/source/browser
-- global suppression keyed only by an external address across unrelated tenants
-- Redis/Kafka/RabbitMQ/Kubernetes/Elasticsearch/OpenSearch
-- changing Search/GEO organic ranking
-- GitHub Actions/CI
-- Sprint 28+ scope
+## Workstreams
+1. Public/API/Next proxy attack-surface audit.
+2. Auth/session/CSRF/RBAC/tenant isolation audit.
+3. SSRF/injection/path traversal/upload/download/browser security audit.
+4. Secrets/privacy/logging/retention audit.
+5. Migration/backup/restore/recovery audit.
+6. Capacity/load-shedding/failure-isolation audit.
+7. Browser smoke matrix and commercial launch checklist.
 
 ## Definition of Done
-- [ ] deterministic bounded failure classification distinguishes hard bounce from retryable/transient failures
-- [ ] repeated hard bounce can create a tenant-scoped exact-recipient suppression idempotently
-- [ ] suppression has bounded reason/count/timestamps and expiry or explicit operator/user clear semantics
-- [ ] suppressed recipients are rejected before new Internet delivery work reaches the MTA
-- [ ] one tenant/user suppression cannot block another tenant/user
-- [ ] dead-letter retry is explicit, auditable, idempotent and allowed only for retryable deliveries
-- [ ] raw message bodies, raw DSNs and full recipient lists are not exposed by operational/admin health paths
-- [ ] per-domain failure pressure can impose a bounded PostgreSQL-backed cooldown without permanent score mutation
-- [ ] cooldown cannot be selected or bypassed by browser request parameters
-- [ ] MX/SPF/DMARC/DKIM drift can be detected and persisted as bounded readiness snapshots
-- [ ] stale replay/event records have documented bounded retention maintenance
-- [ ] stale `SUBMITTED` deliveries have deterministic reconciliation behavior
-- [ ] aggregate deliverability metrics are available without body inspection
-- [ ] existing Sprint 25/26 internal and Internet Mail contracts remain backwards-compatible
-- [ ] tests cover tenant isolation, idempotency, suppression threshold, transient failures, cooldown caps and retry authorization
-- [ ] no new infrastructure or GitHub Actions/CI added
-- [ ] Sprint 27 report created
+- [ ] no unresolved known P0/P1 security or data-integrity defects
+- [ ] public/backend proxy routes are explicit and cannot become generic internal API tunnels
+- [ ] auth cookies are HttpOnly/SameSite and Secure outside local/dev/test
+- [ ] browser mutations require CSRF; machine callbacks require bounded signed auth + replay protection
+- [ ] tenant isolation regression tests cover Webmaster, Mail, Reviews, Billing/Claims critical paths
+- [ ] crawler/Webmaster external fetches revalidate DNS/IP after redirects and block private/metadata targets
+- [ ] attachment/blob paths cannot traverse storage root and downloads use safe response headers
+- [ ] Admin VIEWER/ANALYST cannot mutate; destructive OPERATOR/SUPERADMIN actions use preview/apply where required
+- [ ] secrets/private keys/raw credentials are absent from user-visible diagnostics and routine logs
+- [ ] migration versions are unique and upgrade-safe
+- [ ] full build + unit tests have verified runtime evidence
+- [ ] integration tests have verified runtime evidence against migrated PostgreSQL
+- [ ] fresh install and previous-schema upgrade are verified
+- [ ] browser smoke tests cover Search, Account, Webmaster, Maps/Reviews, Mail and Admin
+- [ ] real Capacity benchmark/snapshot is available
+- [ ] current-schema BACKUP and RESTORE drills are PASS
+- [ ] Internet Mail DNS/MTA/suppression/callback flow is verified when Internet Mail is enabled
+- [ ] incident/recovery/security runbook is updated
+- [ ] final commercial-readiness report states exact blockers and does not convert missing evidence into PASS
+- [ ] no GitHub Actions / CI is added
+
+## Forbidden Work
+- new product verticals while this gate is open
+- replacing the fixed stack
+- Kubernetes/Kafka/RabbitMQ/Redis/Elasticsearch/OpenSearch/vector DB
+- weakening auth/CSRF/SSRF controls to simplify testing
+- exposing raw secrets, recipient lists, payment payloads or private keys to Admin UI
+- marking the project commercial READY without actual runtime evidence
+- GitHub Actions / CI
