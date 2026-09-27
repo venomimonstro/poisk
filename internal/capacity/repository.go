@@ -59,6 +59,14 @@ type FinalSnapshot struct{
 	Bottlenecks []Bottleneck `json:"bottlenecks"`
 }
 
+func (r *Repository) CurrentSchema(ctx context.Context)(int64,error){
+	if r==nil||r.db==nil{return 0,ErrInvalid}
+	var version int64
+	if err:=r.db.QueryRow(ctx,`SELECT COALESCE(max(version),0) FROM schema_migrations`).Scan(&version);err!=nil{return 0,err}
+	if version<=0{return 0,ErrInvalid}
+	return version,nil
+}
+
 func (r *Repository) StartRun(ctx context.Context,label,mode string,targetDocuments int64,config any)(int64,error){
 	label=strings.TrimSpace(label);mode=strings.ToUpper(strings.TrimSpace(mode));if r==nil||r.db==nil||label==""||len(label)>128||(mode!="LIVE_READONLY"&&mode!="ISOLATED_1M")||targetDocuments<=0||targetDocuments>100_000_000{return 0,ErrInvalid}
 	raw,err:=json.Marshal(config);if err!=nil{return 0,err};var id int64
