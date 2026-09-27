@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+export MIGRATIONS_DIR="${MIGRATIONS_DIR:-$ROOT_DIR/db/migrations}"
 
 : "${RELEASE_VERSION:?RELEASE_VERSION is required}"
 : "${READINESS_GIT_SHA:?READINESS_GIT_SHA is required}"
@@ -62,6 +63,7 @@ BUILD_LOG="$ARTIFACT_ROOT/build-unit.log"
 {
   echo "release_version=$RELEASE_VERSION"
   echo "git_commit=$READINESS_GIT_SHA"
+  echo "migrations_dir=$MIGRATIONS_DIR"
   echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   go version
   node --version
