@@ -80,8 +80,8 @@ run_logged "$BUILD_LOG" go build -trimpath -o "$APP_BIN" ./cmd/app
 echo "completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$BUILD_LOG"
 
 if [[ "${READINESS_RECORD:-0}" == "1" ]]; then
-  [[ -n "${POSTGRES_DSN:-}" ]] || {
-    echo "POSTGRES_DSN is required when READINESS_RECORD=1" >&2
+  [[ -n "${POSTGRES_PASSWORD:-}" ]] || {
+    echo "POSTGRES_PASSWORD is required when READINESS_RECORD=1; PostgreSQL connection uses POSTGRES_HOST/PORT/DB/USER/PASSWORD/SSLMODE" >&2
     exit 2
   }
   "$APP_BIN" readinessctl candidate
@@ -117,7 +117,7 @@ fi
 if [[ "${READINESS_RECORD:-0}" == "1" ]]; then
   "$APP_BIN" readinessctl check || true
 else
-  echo "Evidence recording disabled. Set READINESS_RECORD=1 and POSTGRES_DSN to record PASS evidence."
+  echo "Evidence recording disabled. Set READINESS_RECORD=1 and canonical POSTGRES_* variables to record PASS evidence."
 fi
 
 cat <<EOF
