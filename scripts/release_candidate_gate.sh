@@ -54,10 +54,6 @@ record_evidence() {
   local artifact="$2"
   local actor="${READINESS_ACTOR:-release-gate}"
   [[ "${READINESS_RECORD:-0}" == "1" ]] || return 0
-  [[ -n "${POSTGRES_DSN:-}" ]] || {
-    echo "POSTGRES_DSN is required when READINESS_RECORD=1" >&2
-    return 2
-  }
   "$APP_BIN" readinessctl record-file "$kind" PASS "$artifact" "$actor" '{"runner":"scripts/release_candidate_gate.sh"}'
 }
 
@@ -82,8 +78,16 @@ run_logged "$BUILD_LOG" go build -trimpath -o "$APP_BIN" ./cmd/app
   run_logged "$BUILD_LOG" npm run build
 )
 echo "completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a "$BUILD_LOG"
-record_evidence BUILD_UNIT "$BUILD_LOG"
 
+if [[ "${READINESS_RECORD:-0}" == "1" ]]; then
+  [[ -n "${POSTGRES_DSN:-}" ]] || {
+    echo "POSTGRES_DSN is required when READINESS_RECORD=1" >&2
+    exit 2
+  }
+  "$APP_BIN" readinessctl candidate
+fi
+
+record_evidence BUILD_UNIT "$BUILD_LOG"
 echo "BUILD_UNIT PASS artifact=$BUILD_LOG sha256=$(sha256_file "$BUILD_LOG")"
 
 if [[ -n "${TEST_DATABASE_URL:-}" ]]; then
