@@ -2,7 +2,7 @@ package mail
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -26,10 +26,13 @@ type DNSReadinessSnapshot struct {
 	CheckedAt time.Time `json:"checked_at"`
 }
 
+// readinessFingerprint is only a deterministic change detector, not a security
+// digest. md5 is intentionally doubled to 64 hex chars so old snapshots can be
+// backfilled in PostgreSQL without adding pgcrypto and still compare exactly.
 func readinessFingerprint(v DNSReadiness) string {
 	reasons:=append([]string(nil),v.Reasons...)
 	payload:=fmt.Sprintf("%t|%t|%t|%t|%t|%s",v.MX,v.SPF,v.DMARC,v.DKIM,v.Ready,strings.Join(reasons,","))
-	sum:=sha256.Sum256([]byte(payload));return hex.EncodeToString(sum[:])
+	sum:=md5.Sum([]byte(payload));hexDigest:=hex.EncodeToString(sum[:]);return hexDigest+hexDigest
 }
 
 func (r Repository) RecordDNSReadiness(ctx context.Context, readiness DNSReadiness, checkedAt time.Time)(DNSReadinessSnapshot,error){
