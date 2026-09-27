@@ -17,6 +17,11 @@ func TestGateRejectsInvalidCommitBeforeDatabaseAccess(t *testing.T){
 	if err==nil{t.Fatal("expected invalid readiness configuration")}
 }
 
+func TestCandidateRejectsInvalidCommitBeforeDatabaseAccess(t *testing.T){
+	_,err:=(Gate{ExpectedVersions:[]int64{1},GitCommit:"not-a-commit",ReleaseVersion:"rc-1"}).Candidate(context.Background())
+	if err==nil{t.Fatal("expected invalid candidate configuration")}
+}
+
 func TestEvidenceKindSetIsClosed(t *testing.T){
 	for _,kind:=range []string{
 		"BUILD_UNIT","INTEGRATION","FRESH_INSTALL","UPGRADE","BROWSER_SMOKE",
