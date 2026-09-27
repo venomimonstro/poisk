@@ -7,4 +7,8 @@ ALTER TABLE recovery_drills
             artifact_bytes IS NOT NULL AND artifact_bytes > 0 AND
             duration_ms IS NOT NULL AND duration_ms > 0
         )
-    );
+    ) NOT VALID;
+
+-- NOT VALID deliberately preserves historical drills created before this
+-- invariant existed. PostgreSQL still enforces the constraint for new and
+-- updated rows; readiness also rejects unverifiable historical PASS rows.
