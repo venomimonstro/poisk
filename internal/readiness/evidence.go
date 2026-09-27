@@ -12,7 +12,10 @@ import (
 )
 
 var sha256Pattern=regexp.MustCompile(`^[0-9a-f]{64}$`)
-var evidenceKinds=map[string]struct{}{"BUILD_UNIT":{},"INTEGRATION":{},"FRESH_INSTALL":{},"UPGRADE":{},"BROWSER_SMOKE":{},"MTA_FLOW":{}}
+var evidenceKinds=map[string]struct{}{
+	"BUILD_UNIT":{},"INTEGRATION":{},"FRESH_INSTALL":{},"UPGRADE":{},"BROWSER_SMOKE":{},
+	"SECURITY_REGRESSION":{},"EDGE_TLS_PROXY":{},"MTA_FLOW":{},
+}
 
 type EvidenceInput struct{
 	Type string
