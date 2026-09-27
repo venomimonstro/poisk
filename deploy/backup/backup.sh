@@ -17,6 +17,7 @@ if [ "$BACKUP_QUIESCED" != "yes" ]; then
 fi
 [ -d "$MAIL_BLOB_DIR" ] || { echo "backup refused: mail blob directory missing: $MAIL_BLOB_DIR" >&2; exit 2; }
 
+start_epoch="$(date +%s)"
 export PGPASSWORD="$POSTGRES_PASSWORD"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dir="$BACKUP_ROOT/$stamp"
@@ -57,6 +58,9 @@ cp /safe-config/default.conf "$dir/nginx-default.conf"
   cd "$dir"
   sha256sum postgres.dump postgres.list mail-db-blobs.list mail-blobs.list mail-blobs.tar.gz docker-compose.yml nginx-default.conf > SHA256SUMS
 )
+end_epoch="$(date +%s)"
+duration_ms="$(( (end_epoch-start_epoch)*1000 ))"
+[ "$duration_ms" -gt 0 ] || duration_ms=1
 cat > "$dir/MANIFEST" <<EOF
 backup_format=poisk-v2
 created_at=$stamp
@@ -70,6 +74,7 @@ mail_blob_count=$blob_count
 mail_db_blob_count=$db_blob_count
 mail_blob_bytes=$blob_bytes
 quiesced=true
+duration_ms=$duration_ms
 EOF
 printf 'ok\n' > "$dir/COMPLETE"
 trap - EXIT INT TERM
