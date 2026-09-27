@@ -15,6 +15,7 @@ import (
 )
 
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type Check struct {
 	Name string `json:"name"`
@@ -90,7 +91,7 @@ func (g Gate) releaseCandidate(ctx context.Context,schema int64)(bool,string,err
 	var build,status string;var required int64;var preflight *time.Time
 	err:=g.DB.QueryRow(ctx,`SELECT build_sha,status,required_schema_version,preflight_at FROM app_releases WHERE version=$1`,g.ReleaseVersion).Scan(&build,&status,&required,&preflight)
 	if errors.Is(err,pgx.ErrNoRows){return false,"release manifest not found",nil};if err!=nil{return false,"",err}
-	build=strings.ToLower(strings.TrimSpace(build));allowedStatus:=status=="STAGED"||status=="ACTIVE"||status=="PREVIOUS"
+	build=strings.ToLower(strings.TrimSpace(build));allowedStatus:=status=="STAGED"||status=="ACTIVE"
 	pass:=build==g.GitCommit&&required==schema&&preflight!=nil&&allowedStatus
 	return pass,fmt.Sprintf("version=%s build_sha=%s expected_sha=%s required_schema=%d expected_schema=%d status=%s preflight=%v",g.ReleaseVersion,build,g.GitCommit,required,schema,status,preflight!=nil),nil
 }
@@ -128,11 +129,11 @@ ORDER BY r.completed_at DESC,r.run_id DESC LIMIT 1`,g.GitCommit,fmt.Sprint(schem
 }
 
 func (g Gate) recovery(ctx context.Context,kind string,schema int64,now time.Time)(bool,string,error){
-	var status string;var recordedSchema int64;var completed time.Time;var artifact *string
-	err:=g.DB.QueryRow(ctx,`SELECT status,database_schema,completed_at,artifact_ref FROM recovery_drills WHERE drill_type=$1 ORDER BY completed_at DESC,drill_id DESC LIMIT 1`,kind).Scan(&status,&recordedSchema,&completed,&artifact)
+	var status,artifact,sha string;var recordedSchema,bytes,duration int64;var completed time.Time
+	err:=g.DB.QueryRow(ctx,`SELECT status,database_schema,completed_at,COALESCE(artifact_ref,''),COALESCE(artifact_sha256,''),COALESCE(artifact_bytes,0),COALESCE(duration_ms,0) FROM recovery_drills WHERE drill_type=$1 ORDER BY completed_at DESC,drill_id DESC LIMIT 1`,kind).Scan(&status,&recordedSchema,&completed,&artifact,&sha,&bytes,&duration)
 	if errors.Is(err,pgx.ErrNoRows){return false,"no recovery drill",nil};if err!=nil{return false,"",err}
-	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute))
-	return status=="PASS"&&recordedSchema==schema&&fresh,fmt.Sprintf("status=%s schema=%d expected_schema=%d fresh_30d=%v artifact=%v completed_at=%s",status,recordedSchema,schema,fresh,artifact,completed.UTC().Format(time.RFC3339)),nil
+	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute));verifiable:=artifact!=""&&sha256Pattern.MatchString(sha)&&bytes>0&&duration>0
+	return status=="PASS"&&recordedSchema==schema&&fresh&&verifiable,fmt.Sprintf("status=%s schema=%d expected_schema=%d fresh_30d=%v verifiable=%v artifact=%s bytes=%d duration_ms=%d completed_at=%s",status,recordedSchema,schema,fresh,verifiable,artifact,bytes,duration,completed.UTC().Format(time.RFC3339)),nil
 }
 
 func (g Gate) resourcePressure(ctx context.Context,now time.Time)(bool,string,error){
