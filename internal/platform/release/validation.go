@@ -9,7 +9,7 @@ import (
 var (
 	imageRefPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,511}$`)
 	versionPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
-	buildPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	buildPattern    = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
 func ValidManifestFields(version, buildSHA, configHash, backendImage, frontendImage string) bool {
