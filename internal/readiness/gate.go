@@ -118,9 +118,13 @@ COALESCE(r.config->>'git_commit',''),COALESCE(r.config->>'database_schema','')
 FROM capacity_benchmark_runs r JOIN capacity_snapshots s ON s.run_id=r.run_id
 WHERE r.status='COMPLETED' AND r.mode='ISOLATED_1M' AND s.measured_documents>=1000000
 AND r.config->>'git_commit'=$1 AND r.config->>'database_schema'=$2
+AND NOT EXISTS (
+  SELECT 1 FROM jsonb_array_elements(s.bottlenecks) AS b
+  WHERE upper(COALESCE(b->>'severity',''))='HIGH'
+)
 ORDER BY r.completed_at DESC,r.run_id DESC LIMIT 1`,g.GitCommit,fmt.Sprint(schema)).Scan(&runID,&snapshotID,&measured,&completed,&hasADR,&commit,&recordedSchema)
-	if errors.Is(err,pgx.ErrNoRows){return false,"no completed ISOLATED_1M snapshot for current commit/schema with >=1,000,000 documents",nil};if err!=nil{return false,"",err}
-	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute));return hasADR&&fresh,fmt.Sprintf("run_id=%d snapshot_id=%d measured=%d commit=%s schema=%s adr=%v fresh_30d=%v completed_at=%s",runID,snapshotID,measured,commit,recordedSchema,hasADR,fresh,completed.UTC().Format(time.RFC3339)),nil
+	if errors.Is(err,pgx.ErrNoRows){return false,"no acceptable ISOLATED_1M snapshot for current commit/schema with >=1,000,000 documents and no HIGH bottlenecks",nil};if err!=nil{return false,"",err}
+	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute));return hasADR&&fresh,fmt.Sprintf("run_id=%d snapshot_id=%d measured=%d commit=%s schema=%s adr=%v high_bottlenecks=0 fresh_30d=%v completed_at=%s",runID,snapshotID,measured,commit,recordedSchema,hasADR,fresh,completed.UTC().Format(time.RFC3339)),nil
 }
 
 func (g Gate) recovery(ctx context.Context,kind string,schema int64,now time.Time)(bool,string,error){
