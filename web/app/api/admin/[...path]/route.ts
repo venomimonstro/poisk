@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ProxyBodyTooLarge, readLimitedProxyBody } from "../../_proxyBody";
 
 const internalBase = (process.env.API_INTERNAL_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
 const maxBodyBytes = 16 * 1024;
@@ -29,10 +30,12 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     return NextResponse.json({ error: "admin_route_not_exposed" }, { status: 404 });
   }
 
-  let body: ArrayBuffer | undefined;
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    body = await request.arrayBuffer();
-    if (body.byteLength > maxBodyBytes) return NextResponse.json({ error: "body_too_large" }, { status: 413 });
+  let body: Uint8Array | undefined;
+  try {
+    if (request.method !== "GET" && request.method !== "HEAD") body = await readLimitedProxyBody(request, maxBodyBytes);
+  } catch (error) {
+    if (error instanceof ProxyBodyTooLarge) return NextResponse.json({ error: "body_too_large" }, { status: 413 });
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }
 
   const target = new URL(`${internalBase}/api/admin/${path.join("/")}`);
