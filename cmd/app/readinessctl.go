@@ -22,7 +22,7 @@ import (
 const maxReadinessArtifactBytes int64 = 256 << 20
 
 func runReadinessCtl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,args []string)error{
-	if len(args)==0{return errors.New("usage: readinessctl candidate|check | record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json] | record-file <type> <PASS|FAIL> <artifact_path> <actor> [details_json]")}
+	if len(args)==0{return errors.New("usage: readinessctl candidate|check|fresh-install-db | record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json] | record-file <type> <PASS|FAIL> <artifact_path> <actor> [details_json]")}
 	versions,err:=migrate.ExpectedVersions(cfg.MigrationsDir);if err!=nil{return err}
 	commit:=strings.ToLower(strings.TrimSpace(os.Getenv("READINESS_GIT_SHA")));if commit==""{return errors.New("READINESS_GIT_SHA is required and must be the exact 40-character commit under test")}
 	releaseVersion:=strings.TrimSpace(os.Getenv("RELEASE_VERSION"))
@@ -34,6 +34,8 @@ func runReadinessCtl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,ar
 		report,err:=gate.Candidate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Valid{return errors.New("release candidate precheck failed")};return nil
 	case "check":
 		report,err:=gate.Evaluate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Ready{return errors.New("commercial readiness gate failed")};return nil
+	case "fresh-install-db":
+		report,err:=runFreshInstallDatabaseCheck(ctx,cfg,versions);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");return enc.Encode(report)
 	case "record":
 		if len(args)<6{return errors.New("usage: readinessctl record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json]")}
 		details,err:=readinessDetails(args,6);if err!=nil{return err}
