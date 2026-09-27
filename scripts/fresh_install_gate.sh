@@ -7,6 +7,7 @@ export MIGRATIONS_DIR="${MIGRATIONS_DIR:-$ROOT_DIR/db/migrations}"
 
 : "${RELEASE_VERSION:?RELEASE_VERSION is required}"
 : "${READINESS_GIT_SHA:?READINESS_GIT_SHA is required}"
+: "${POSTGRES_PASSWORD:?candidate POSTGRES_PASSWORD is required for candidate precheck and evidence binding}"
 : "${READINESS_FRESH_POSTGRES_HOST:?READINESS_FRESH_POSTGRES_HOST is required}"
 : "${READINESS_FRESH_POSTGRES_DB:?READINESS_FRESH_POSTGRES_DB is required}"
 : "${READINESS_FRESH_POSTGRES_USER:?READINESS_FRESH_POSTGRES_USER is required}"
@@ -96,10 +97,6 @@ CHILD_PID=""
 trap - EXIT INT TERM
 
 if [[ "${READINESS_RECORD:-0}" == "1" ]]; then
-  [[ -n "${POSTGRES_PASSWORD:-}" ]] || {
-    echo "candidate POSTGRES_PASSWORD is required to record evidence" >&2
-    exit 2
-  }
   "$APP_BIN" readinessctl candidate
   "$APP_BIN" readinessctl record-file FRESH_INSTALL PASS "$LOG" "${READINESS_ACTOR:-fresh-install-gate}" '{"runner":"scripts/fresh_install_gate.sh","boot_health":true}'
 fi
