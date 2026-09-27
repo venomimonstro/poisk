@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: dev down logs test test-integration lint frontend-check migrate rollback seed search-quality benchmark capacity-status candidate readiness release-gate fresh-install-gate upgrade-gate backup restore-test health
+.PHONY: dev down logs test test-integration lint frontend-check migrate rollback seed search-quality benchmark capacity-status candidate readiness release-gate fresh-install-gate upgrade-gate backup backup-verify recovery-gate restore-test health
 
 dev:
 	docker compose up --build -d
@@ -73,16 +73,19 @@ upgrade-gate:
 	bash scripts/upgrade_gate.sh
 
 backup:
-	@echo "A backup is not evidence until a real backup artifact is produced and recorded with exact release/commit/schema metadata."
-	@echo "Run the environment-specific backup procedure, then use: ./app recoveryctl record BACKUP ..."
-	@echo "See docs/runbooks/security-commercial-readiness.md"
-	@exit 2
+	@test "$$BACKUP_QUIESCED" = "yes" || (echo "BACKUP_QUIESCED=yes is required after API/mail mutators and workers are stopped" >&2; exit 2)
+	docker compose --profile ops run --rm backup
 
-restore-test:
-	@echo "A restore drill must restore a real artifact into an isolated database and validate it before recording PASS."
-	@echo "After the drill use: ./app recoveryctl record RESTORE ..."
-	@echo "See docs/runbooks/security-commercial-readiness.md"
-	@exit 2
+backup-verify:
+	@test -n "$$BACKUP_DIR" || (echo "BACKUP_DIR is required and must be the container path /backups/<timestamp>" >&2; exit 2)
+	docker compose --profile ops run --rm --entrypoint sh backup /ops/verify.sh "$$BACKUP_DIR"
+
+recovery-gate:
+	@test -n "$$READINESS_GIT_SHA" || (echo "READINESS_GIT_SHA is required" >&2; exit 2)
+	@test -n "$$RELEASE_VERSION" || (echo "RELEASE_VERSION is required" >&2; exit 2)
+	bash scripts/recovery_gate.sh
+
+restore-test: recovery-gate
 
 health:
 	curl -fsS http://localhost/health/live && echo
