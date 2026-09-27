@@ -20,6 +20,7 @@ var sensitiveEvidenceKeys=map[string]struct{}{
 	"password":{},"passwd":{},"token":{},"access_token":{},"refresh_token":{},"authorization":{},"cookie":{},
 	"secret":{},"client_secret":{},"private_key":{},"api_key":{},"apikey":{},"access_key":{},"session":{},"session_token":{},
 }
+var sensitiveEvidenceSuffixes=[]string{"_password","_passwd","_token","_secret","_private_key","_api_key","_access_key"}
 
 type EvidenceInput struct{
 	Type string
@@ -47,11 +48,17 @@ func containsSensitiveEvidenceKey(v any)bool{
 	case map[string]any:
 		for key,item:=range value{
 			normalized:=strings.ToLower(strings.TrimSpace(key));normalized=strings.ReplaceAll(normalized,"-","_");normalized=strings.ReplaceAll(normalized," ","_")
-			if _,blocked:=sensitiveEvidenceKeys[normalized];blocked{return true}
+			if isSensitiveEvidenceKey(normalized){return true}
 			if containsSensitiveEvidenceKey(item){return true}
 		}
 	case []any:
 		for _,item:=range value{if containsSensitiveEvidenceKey(item){return true}}
 	}
+	return false
+}
+
+func isSensitiveEvidenceKey(key string)bool{
+	if _,blocked:=sensitiveEvidenceKeys[key];blocked{return true}
+	for _,suffix:=range sensitiveEvidenceSuffixes{if strings.HasSuffix(key,suffix){return true}}
 	return false
 }
