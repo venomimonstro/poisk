@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -35,6 +36,8 @@ type Gate struct {
 	ExpectedVersions []int64
 	GitCommit string
 	InternetMail bool
+	MailDomain string
+	MailSelector string
 	Now func() time.Time
 }
 
@@ -42,6 +45,7 @@ func (g Gate) Evaluate(ctx context.Context) (Report, error) {
 	if g.DB==nil{return Report{},errors.New("readiness database is not initialized")}
 	if len(g.ExpectedVersions)==0{return Report{},errors.New("expected migration versions are required")}
 	if !commitPattern.MatchString(g.GitCommit){return Report{},errors.New("git commit must be a lowercase 40-character SHA")}
+	if g.InternetMail&&(strings.TrimSpace(g.MailDomain)==""||strings.TrimSpace(g.MailSelector)==""){return Report{},errors.New("mail domain and DKIM selector are required when Internet Mail is enabled")}
 	now:=time.Now().UTC();if g.Now!=nil{now=g.Now().UTC()}
 	expected:=append([]int64(nil),g.ExpectedVersions...);sort.Slice(expected,func(i,j int)bool{return expected[i]<expected[j]})
 	report:=Report{Ready:true,GitCommit:g.GitCommit,ExpectedSchema:expected[len(expected)-1],CheckedAt:now}
@@ -64,7 +68,7 @@ func (g Gate) Evaluate(ctx context.Context) (Report, error) {
 
 	if g.InternetMail{
 		mtaPass,mtaDetail,err:=g.evidence(ctx,"MTA_FLOW",report.ExpectedSchema);if err!=nil{return Report{},err};add("evidence_MTA_FLOW",mtaPass,mtaDetail)
-		dnsPass,dnsDetail,err:=g.mailDNS(ctx,now);if err!=nil{return Report{},err};add("mail_dns",dnsPass,dnsDetail)
+		dnsPass,dnsDetail,err:=g.mailDNS(ctx,now,strings.ToLower(strings.TrimSpace(g.MailDomain)),strings.TrimSpace(g.MailSelector));if err!=nil{return Report{},err};add("mail_dns",dnsPass,dnsDetail)
 	}
 	return report,nil
 }
@@ -115,9 +119,9 @@ func (g Gate) resourcePressure(ctx context.Context,now time.Time)(bool,string,er
 	fresh:=now.Sub(updated.UTC())<=2*time.Minute&&updated.Before(now.Add(5*time.Minute));return fresh&&state!="CRITICAL"&&state!="",fmt.Sprintf("state=%s fresh_2m=%v updated_at=%s",state,fresh,updated.UTC().Format(time.RFC3339)),nil
 }
 
-func (g Gate) mailDNS(ctx context.Context,now time.Time)(bool,string,error){
-	var ready,drift bool;var domain,selector string;var checked time.Time;var reasons []string
-	err:=g.DB.QueryRow(ctx,`SELECT domain,selector,ready,drift,reasons,checked_at FROM mail_dns_readiness_snapshots ORDER BY checked_at DESC,snapshot_id DESC LIMIT 1`).Scan(&domain,&selector,&ready,&drift,&reasons,&checked)
-	if errors.Is(err,pgx.ErrNoRows){return false,"no mail DNS readiness snapshot",nil};if err!=nil{return false,"",err}
+func (g Gate) mailDNS(ctx context.Context,now time.Time,domain,selector string)(bool,string,error){
+	var ready,drift bool;var checked time.Time;var reasons []string
+	err:=g.DB.QueryRow(ctx,`SELECT ready,drift,reasons,checked_at FROM mail_dns_readiness_snapshots WHERE domain=$1 AND selector=$2 ORDER BY checked_at DESC,snapshot_id DESC LIMIT 1`,domain,selector).Scan(&ready,&drift,&reasons,&checked)
+	if errors.Is(err,pgx.ErrNoRows){return false,"no mail DNS readiness snapshot for configured domain/selector",nil};if err!=nil{return false,"",err}
 	fresh:=now.Sub(checked.UTC())<=30*time.Minute&&checked.Before(now.Add(5*time.Minute));return ready&&!drift&&fresh,fmt.Sprintf("domain=%s selector=%s ready=%v drift=%v fresh_30m=%v reasons=%v checked_at=%s",domain,selector,ready,drift,fresh,reasons,checked.UTC().Format(time.RFC3339)),nil
 }
