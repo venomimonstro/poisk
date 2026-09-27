@@ -45,6 +45,13 @@ func TestLoadProductionRequiresHTTPSPublicOrigin(t *testing.T){
 	cfg,err:=Load();if err!=nil{t.Fatalf("Load() error = %v",err)};if cfg.PublicBaseURL!="https://search.example.test"{t.Fatalf("public base=%q",cfg.PublicBaseURL)}
 }
 
+func TestLoadUnknownNonLocalEnvironmentAlsoRequiresHTTPSOrigin(t *testing.T){
+	t.Setenv("POSTGRES_PASSWORD","secret");t.Setenv("APP_ENV","qa");t.Setenv("PUBLIC_BASE_URL","")
+	if _,err:=Load();err==nil{t.Fatal("expected unknown non-local environment to require public HTTPS origin")}
+	t.Setenv("PUBLIC_BASE_URL","https://qa.example.test")
+	if _,err:=Load();err!=nil{t.Fatalf("Load() error = %v",err)}
+}
+
 func TestLoadInternetMailUsesCanonicalVariables(t *testing.T) {
 	t.Setenv("POSTGRES_PASSWORD", "secret")
 	t.Setenv("MAIL_INTERNET_ENABLED", "true")
