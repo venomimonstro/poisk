@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"testing"
 )
@@ -24,6 +25,14 @@ func TestLoadValidConfiguration(t *testing.T) {
 		t.Fatalf("configuration is incomplete: %+v", cfg)
 	}
 	_ = os.Unsetenv("POSTGRES_PASSWORD")
+}
+
+func TestLoadEscapesPostgresCredentials(t *testing.T){
+	password:="p@ss:/?# value"
+	t.Setenv("POSTGRES_USER","poisk-user");t.Setenv("POSTGRES_PASSWORD",password);t.Setenv("POSTGRES_DB","poisk-db");t.Setenv("POSTGRES_HOST","postgres");t.Setenv("POSTGRES_PORT","5432")
+	cfg,err:=Load();if err!=nil{t.Fatal(err)};parsed,err:=url.Parse(cfg.PostgresDSN);if err!=nil{t.Fatal(err)}
+	if parsed.User.Username()!="poisk-user"{t.Fatalf("user=%q",parsed.User.Username())};got,ok:=parsed.User.Password();if !ok||got!=password{t.Fatalf("password round-trip failed: %q",got)}
+	if parsed.Host!="postgres:5432"||parsed.Path!="/poisk-db"||parsed.Query().Get("sslmode")!="disable"{t.Fatalf("dsn=%q",cfg.PostgresDSN)}
 }
 
 func TestLoadRejectsInvalidManticorePort(t *testing.T) {
