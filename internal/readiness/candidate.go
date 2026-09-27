@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type CandidateReport struct {
@@ -32,5 +30,3 @@ func (g Gate) Candidate(ctx context.Context)(CandidateReport,error){
 	releasePass,releaseDetail,_,err:=g.releaseCandidate(ctx,out.ExpectedSchema);if err!=nil{return CandidateReport{},err};add("release_manifest",releasePass,releaseDetail)
 	return out,nil
 }
-
-var _ *pgxpool.Pool
