@@ -52,14 +52,14 @@ func (g Gate) Evaluate(ctx context.Context) (Report, error) {
 	missing,unexpected:=diffVersions(expected,applied)
 	add("migrations_exact",len(missing)==0&&len(unexpected)==0,fmt.Sprintf("missing=%v unexpected=%v",missing,unexpected))
 
-	for _,kind:=range []string{"BUILD_UNIT","INTEGRATION","FRESH_INSTALL","UPGRADE","BROWSER_SMOKE"}{
+	for _,kind:=range []string{"BUILD_UNIT","INTEGRATION","FRESH_INSTALL","UPGRADE","BROWSER_SMOKE","SECURITY_REGRESSION","EDGE_TLS_PROXY"}{
 		pass,detail,err:=g.evidence(ctx,kind,report.ExpectedSchema);if err!=nil{return Report{},err};add("evidence_"+kind,pass,detail)
 	}
 
 	qualityPass,qualityDetail,err:=g.quality(ctx,now);if err!=nil{return Report{},err};add("quality_gate",qualityPass,qualityDetail)
 	capacityPass,capacityDetail,err:=g.capacity(ctx,now);if err!=nil{return Report{},err};add("capacity_1m",capacityPass,capacityDetail)
-	backupPass,backupDetail,err:=g.recovery(ctx,"BACKUP",report.ExpectedSchema);if err!=nil{return Report{},err};add("recovery_backup",backupPass,backupDetail)
-	restorePass,restoreDetail,err:=g.recovery(ctx,"RESTORE",report.ExpectedSchema);if err!=nil{return Report{},err};add("recovery_restore",restorePass,restoreDetail)
+	backupPass,backupDetail,err:=g.recovery(ctx,"BACKUP",report.ExpectedSchema,now);if err!=nil{return Report{},err};add("recovery_backup",backupPass,backupDetail)
+	restorePass,restoreDetail,err:=g.recovery(ctx,"RESTORE",report.ExpectedSchema,now);if err!=nil{return Report{},err};add("recovery_restore",restorePass,restoreDetail)
 	pressurePass,pressureDetail,err:=g.resourcePressure(ctx,now);if err!=nil{return Report{},err};add("resource_pressure",pressurePass,pressureDetail)
 
 	if g.InternetMail{
@@ -100,11 +100,12 @@ func (g Gate) capacity(ctx context.Context,now time.Time)(bool,string,error){
 	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute));return hasADR&&fresh,fmt.Sprintf("run_id=%d snapshot_id=%d measured=%d adr=%v fresh_30d=%v completed_at=%s",runID,snapshotID,measured,hasADR,fresh,completed.UTC().Format(time.RFC3339)),nil
 }
 
-func (g Gate) recovery(ctx context.Context,kind string,schema int64)(bool,string,error){
+func (g Gate) recovery(ctx context.Context,kind string,schema int64,now time.Time)(bool,string,error){
 	var status string;var recordedSchema int64;var completed time.Time;var artifact *string
 	err:=g.DB.QueryRow(ctx,`SELECT status,database_schema,completed_at,artifact_ref FROM recovery_drills WHERE drill_type=$1 ORDER BY completed_at DESC,drill_id DESC LIMIT 1`,kind).Scan(&status,&recordedSchema,&completed,&artifact)
 	if errors.Is(err,pgx.ErrNoRows){return false,"no recovery drill",nil};if err!=nil{return false,"",err}
-	return status=="PASS"&&recordedSchema==schema,fmt.Sprintf("status=%s schema=%d expected_schema=%d artifact=%v completed_at=%s",status,recordedSchema,schema,artifact,completed.UTC().Format(time.RFC3339)),nil
+	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute))
+	return status=="PASS"&&recordedSchema==schema&&fresh,fmt.Sprintf("status=%s schema=%d expected_schema=%d fresh_30d=%v artifact=%v completed_at=%s",status,recordedSchema,schema,fresh,artifact,completed.UTC().Format(time.RFC3339)),nil
 }
 
 func (g Gate) resourcePressure(ctx context.Context,now time.Time)(bool,string,error){
