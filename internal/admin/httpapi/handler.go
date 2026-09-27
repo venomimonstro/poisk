@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/venomimonstro/poisk/internal/admin"
+	"github.com/venomimonstro/poisk/internal/readiness"
 )
 
 type contextKey string
@@ -20,7 +21,8 @@ const sessionCookie="poisk_admin_session"
 type OpsReader interface{Snapshot(context.Context)(admin.OpsSnapshot,error)}
 type OwnerReader interface{Snapshot(context.Context)(admin.OwnerSnapshot,error)}
 type DiagnosticsReader interface{Snapshot(context.Context)(admin.DiagnosticsSnapshot,error)}
-type Handler struct{Service *admin.Service;Ops OpsReader;Owner OwnerReader;Diagnostics DiagnosticsReader;SecureCookies bool}
+type ReadinessReader interface{Evaluate(context.Context)(readiness.Report,error)}
+type Handler struct{Service *admin.Service;Ops OpsReader;Owner OwnerReader;Diagnostics DiagnosticsReader;Readiness ReadinessReader;SecureCookies bool}
 
 type loginRequest struct{Email string `json:"email"`;Password string `json:"password"`;SecondFactor string `json:"second_factor"`}
 
@@ -32,6 +34,7 @@ func (h Handler) Routes()http.Handler{
 		protected.Get("/me",h.Me)
 		protected.Get("/csrf",h.RotateCSRF)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/status",h.Status)
+		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/readiness",h.ReadinessStatus)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/domains",h.Domains)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/diagnostics",h.DiagnosticsSnapshot)
 		protected.With(h.RequireRoles("OPERATOR","ANALYST","VIEWER","SUPPORT")).Get("/mail/gateway-health",h.MailGatewayHealth)
@@ -79,6 +82,7 @@ func (h Handler) Login(w http.ResponseWriter,r *http.Request){
 
 func (h Handler) Me(w http.ResponseWriter,r *http.Request){session,ok:=SessionFromContext(r.Context());if !ok{writeError(w,http.StatusUnauthorized,"unauthorized");return};writeJSON(w,http.StatusOK,map[string]any{"admin_id":session.AdminID,"email":session.Email,"role":session.Role,"expires_at":session.ExpiresAt})}
 func (h Handler) Status(w http.ResponseWriter,r *http.Request){if h.Ops==nil{writeError(w,http.StatusServiceUnavailable,"ops_unavailable");return};snapshot,err:=h.Ops.Snapshot(r.Context());if err!=nil{writeError(w,http.StatusServiceUnavailable,"ops_unavailable");return};writeJSON(w,http.StatusOK,snapshot)}
+func (h Handler) ReadinessStatus(w http.ResponseWriter,r *http.Request){if h.Readiness==nil{writeError(w,http.StatusServiceUnavailable,"readiness_unavailable");return};report,err:=h.Readiness.Evaluate(r.Context());if err!=nil{writeError(w,http.StatusServiceUnavailable,"readiness_unavailable");return};writeJSON(w,http.StatusOK,report)}
 func (h Handler) OwnerDashboard(w http.ResponseWriter,r *http.Request){if h.Owner==nil{writeError(w,http.StatusServiceUnavailable,"owner_dashboard_unavailable");return};snapshot,err:=h.Owner.Snapshot(r.Context());if err!=nil{writeError(w,http.StatusServiceUnavailable,"owner_dashboard_unavailable");return};writeJSON(w,http.StatusOK,snapshot)}
 func (h Handler) DiagnosticsSnapshot(w http.ResponseWriter,r *http.Request){if h.Diagnostics==nil{writeError(w,http.StatusServiceUnavailable,"diagnostics_unavailable");return};snapshot,err:=h.Diagnostics.Snapshot(r.Context());if err!=nil{writeError(w,http.StatusServiceUnavailable,"diagnostics_unavailable");return};writeJSON(w,http.StatusOK,snapshot)}
 func (h Handler) Logout(w http.ResponseWriter,r *http.Request){session,ok:=SessionFromContext(r.Context());if !ok{writeError(w,http.StatusUnauthorized,"unauthorized");return};if err:=h.Service.Logout(r.Context(),session);err!=nil{writeError(w,http.StatusServiceUnavailable,"logout_failed");return};h.clearSessionCookie(w);writeJSON(w,http.StatusOK,map[string]bool{"ok":true})}
