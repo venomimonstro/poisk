@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -22,8 +23,29 @@ func runMailGatewayWorker(pool *pgxpool.Pool) error {
 	if baseURL==""{return errors.New("MAIL_MTA_BASE_URL is required for mail-gateway-worker")};if len(secret)<32{return errors.New("MAIL_GATEWAY_SHARED_SECRET must be at least 32 bytes")}
 	domain:=strings.TrimSpace(os.Getenv("MAIL_DOMAIN"));selector:=strings.TrimSpace(os.Getenv("MAIL_DKIM_SELECTOR"));expectedDKIM:=strings.TrimSpace(os.Getenv("MAIL_DKIM_PUBLIC_TXT"));if domain==""||selector==""{return errors.New("MAIL_DOMAIN and MAIL_DKIM_SELECTOR are required for Internet mail")}
 	ctx,stop:=signal.NotifyContext(context.Background(),syscall.SIGINT,syscall.SIGTERM);defer stop()
-	checkCtx,cancel:=context.WithTimeout(ctx,10*time.Second);readiness,err:=mailcore.CheckInternetMailDNS(checkCtx,net.DefaultResolver,domain,selector,expectedDKIM);cancel();if err!=nil{return fmt.Errorf("mail DNS readiness check: %w",err)};if !readiness.Ready{return fmt.Errorf("mail DNS is not ready: %s",strings.Join(readiness.Reasons,","))}
+	repo:=mailcore.Repository{DB:pool}
+	checkCtx,cancel:=context.WithTimeout(ctx,10*time.Second);readiness,err:=mailcore.CheckInternetMailDNS(checkCtx,net.DefaultResolver,domain,selector,expectedDKIM);cancel();if err!=nil{return fmt.Errorf("mail DNS readiness check: %w",err)}
+	if _,err=repo.RecordDNSReadiness(ctx,readiness,time.Now().UTC());err!=nil{return fmt.Errorf("record mail DNS readiness: %w",err)}
+	if !readiness.Ready{return fmt.Errorf("mail DNS is not ready: %s",strings.Join(readiness.Reasons,","))}
+
+	go monitorMailDNSReadiness(ctx,repo,domain,selector,expectedDKIM)
 	workerID:=fmt.Sprintf("mail-gateway-%d",os.Getpid())
-	worker:=mailcore.GatewayWorker{Repo:mailcore.Repository{DB:pool},MTA:mailcore.MTAClient{BaseURL:baseURL,Secret:[]byte(secret),HTTP:&http.Client{Timeout:20*time.Second}},BlobRoot:blobRoot,WorkerID:workerID,BatchSize:16,Lease:45*time.Second,Poll:time.Second}
+	worker:=mailcore.GatewayWorker{Repo:repo,MTA:mailcore.MTAClient{BaseURL:baseURL,Secret:[]byte(secret),HTTP:&http.Client{Timeout:20*time.Second}},BlobRoot:blobRoot,WorkerID:workerID,BatchSize:16,Lease:45*time.Second,Poll:time.Second}
 	return worker.Run(ctx)
+}
+
+func monitorMailDNSReadiness(ctx context.Context,repo mailcore.Repository,domain,selector,expectedDKIM string){
+	ticker:=time.NewTicker(15*time.Minute);defer ticker.Stop()
+	for{
+		select{
+		case <-ctx.Done():return
+		case checkedAt:=<-ticker.C:
+			checkCtx,cancel:=context.WithTimeout(ctx,10*time.Second)
+			readiness,err:=mailcore.CheckInternetMailDNS(checkCtx,net.DefaultResolver,domain,selector,expectedDKIM)
+			cancel()
+			if err!=nil{slog.Warn("mail DNS readiness check failed","error",err);continue}
+			snapshot,err:=repo.RecordDNSReadiness(ctx,readiness,checkedAt.UTC());if err!=nil{slog.Warn("mail DNS readiness snapshot failed","error",err);continue}
+			if snapshot.Drift||!snapshot.Ready{slog.Warn("mail DNS readiness drift","domain",snapshot.Domain,"ready",snapshot.Ready,"drift",snapshot.Drift,"reasons",snapshot.Reasons)}
+		}
+	}
 }
