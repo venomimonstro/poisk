@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Env                  string
 	Addr                 string
+	PublicBaseURL        string
 	ShutdownTimeout      time.Duration
 	LogLevel             string
 	PostgresDSN          string
@@ -38,6 +39,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Env:             getenv("APP_ENV", "development"),
 		Addr:            getenv("APP_ADDR", ":8080"),
+		PublicBaseURL:   strings.TrimSpace(os.Getenv("PUBLIC_BASE_URL")),
 		LogLevel:        getenv("LOG_LEVEL", "info"),
 		ManticoreHost:   getenv("MANTICORE_HOST", "manticore"),
 		MigrationsDir:   getenv("MIGRATIONS_DIR", "/app/db/migrations"),
@@ -45,6 +47,14 @@ func Load() (Config, error) {
 		MapPublicPrefix: getenv("MAP_PUBLIC_PREFIX", "/maps"),
 		MailDomain:      strings.ToLower(strings.TrimSpace(os.Getenv("MAIL_DOMAIN"))),
 		MailMTABaseURL:  strings.TrimSpace(os.Getenv("MAIL_MTA_BASE_URL")),
+	}
+
+	if productionLike(cfg.Env) {
+		publicURL,parseErr:=url.Parse(cfg.PublicBaseURL)
+		if parseErr!=nil||publicURL.Scheme!="https"||publicURL.Hostname()==""||publicURL.User!=nil||publicURL.RawQuery!=""||publicURL.Fragment!=""||(publicURL.EscapedPath()!=""&&publicURL.EscapedPath()!="/") {
+			return Config{},errors.New("PUBLIC_BASE_URL must be an https origin in staging/production")
+		}
+		cfg.PublicBaseURL=strings.TrimRight(cfg.PublicBaseURL,"/")
 	}
 
 	shutdown, err := positiveDuration("APP_SHUTDOWN_TIMEOUT", "10s")
@@ -101,6 +111,7 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+func productionLike(v string)bool{switch strings.ToLower(strings.TrimSpace(v)){case "production","prod","staging","stage":return true;default:return false}}
 func validMailDomain(v string)bool{if len(v)<3||len(v)>253||strings.ContainsAny(v," /:@?#\\"){return false};labels:=strings.Split(v,".");if len(labels)<2{return false};for _,label:=range labels{if len(label)<1||len(label)>63||label[0]=='-'||label[len(label)-1]=='-'{return false};for _,r:=range label{if (r<'a'||r>'z')&&(r<'0'||r>'9')&&r!='-'{return false}}};return true}
 func positiveDuration(key, fallback string) (time.Duration, error) {v, err := time.ParseDuration(getenv(key, fallback));if err != nil || v <= 0 { return 0, fmt.Errorf("invalid %s", key) };return v, nil}
 func positiveInt(key, fallback string) (int, error) {v, err := strconv.Atoi(getenv(key, fallback));if err != nil || v <= 0 { return 0, fmt.Errorf("invalid %s", key) };return v, nil}
