@@ -3,10 +3,7 @@ ALTER TABLE mail_dns_readiness_snapshots
     ADD COLUMN IF NOT EXISTS fingerprint CHAR(64);
 
 UPDATE mail_dns_readiness_snapshots
-SET fingerprint = encode(digest(
-    concat_ws('|',mx_ok::text,spf_ok::text,dmarc_ok::text,dkim_ok::text,ready::text,array_to_string(reasons,',')),
-    'sha256'
-),'hex')
+SET fingerprint = repeat(md5(concat_ws('|',mx_ok::text,spf_ok::text,dmarc_ok::text,dkim_ok::text,ready::text,array_to_string(reasons,','))),2)
 WHERE fingerprint IS NULL;
 
 ALTER TABLE mail_dns_readiness_snapshots
