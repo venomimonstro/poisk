@@ -24,31 +24,47 @@ mkdir -p "$dir"
 cleanup(){ [ -d "$dir" ] && [ ! -f "$dir/COMPLETE" ] && rm -rf "$dir"; }
 trap cleanup EXIT INT TERM
 
+# In a quiesced window, DB metadata and blob files must already agree. Refuse
+# to bless an existing corruption as a valid backup artifact.
+db_blob_list="$dir/mail-db-blobs.list"
+psql --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
+  -v ON_ERROR_STOP=1 -Atc "SELECT storage_key::text || '.blob' FROM mail_attachment_blobs ORDER BY storage_key" > "$db_blob_list"
+missing=0
+while IFS= read -r name; do
+  [ -z "$name" ] && continue
+  if [ ! -f "$MAIL_BLOB_DIR/$name" ]; then
+    echo "backup refused: DB references missing mail blob $name" >&2
+    missing=$((missing+1))
+  fi
+done < "$db_blob_list"
+[ "$missing" -eq 0 ] || exit 3
+schema_version="$(psql --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -v ON_ERROR_STOP=1 -Atc "SELECT COALESCE(max(version),0) FROM schema_migrations")"
+
 pg_dump --host="$POSTGRES_HOST" --port="$POSTGRES_PORT" --username="$POSTGRES_USER" \
   --format=custom --compress=6 --no-owner --no-privileges --file="$dir/postgres.dump" "$POSTGRES_DB"
 pg_restore --list "$dir/postgres.dump" > "$dir/postgres.list"
 
-# Archive only committed root-level *.blob files. A generated list avoids shell
-# glob and tar wildcard differences and excludes upload *.tmp files by design.
 blob_list="$dir/mail-blobs.list"
 find "$MAIL_BLOB_DIR" -maxdepth 1 -type f -name '*.blob' -printf '%f\n' | LC_ALL=C sort > "$blob_list"
 blob_count="$(wc -l < "$blob_list" | tr -d ' ')"
+db_blob_count="$(wc -l < "$db_blob_list" | tr -d ' ')"
 blob_bytes="$(find "$MAIL_BLOB_DIR" -maxdepth 1 -type f -name '*.blob' -exec stat -c '%s' {} \; | awk '{s+=$1} END{print s+0}')"
 tar -C "$MAIL_BLOB_DIR" -czf "$dir/mail-blobs.tar.gz" -T "$blob_list"
 
 cp /safe-config/docker-compose.yml "$dir/docker-compose.yml"
 cp /safe-config/default.conf "$dir/nginx-default.conf"
-
-sha256sum "$dir/postgres.dump" "$dir/postgres.list" "$dir/mail-blobs.list" "$dir/mail-blobs.tar.gz" "$dir/docker-compose.yml" "$dir/nginx-default.conf" > "$dir/SHA256SUMS"
+sha256sum "$dir/postgres.dump" "$dir/postgres.list" "$dir/mail-db-blobs.list" "$dir/mail-blobs.list" "$dir/mail-blobs.tar.gz" "$dir/docker-compose.yml" "$dir/nginx-default.conf" > "$dir/SHA256SUMS"
 cat > "$dir/MANIFEST" <<EOF
 backup_format=poisk-v2
 created_at=$stamp
 database=$POSTGRES_DB
 postgres_host=$POSTGRES_HOST
+database_schema=$schema_version
 secrets_included=false
 manticore_included=false
 mail_blobs_included=true
 mail_blob_count=$blob_count
+mail_db_blob_count=$db_blob_count
 mail_blob_bytes=$blob_bytes
 quiesced=true
 EOF
