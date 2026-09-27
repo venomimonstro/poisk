@@ -53,7 +53,10 @@ tar -C "$MAIL_BLOB_DIR" -czf "$dir/mail-blobs.tar.gz" -T "$blob_list"
 
 cp /safe-config/docker-compose.yml "$dir/docker-compose.yml"
 cp /safe-config/default.conf "$dir/nginx-default.conf"
-sha256sum "$dir/postgres.dump" "$dir/postgres.list" "$dir/mail-db-blobs.list" "$dir/mail-blobs.list" "$dir/mail-blobs.tar.gz" "$dir/docker-compose.yml" "$dir/nginx-default.conf" > "$dir/SHA256SUMS"
+(
+  cd "$dir"
+  sha256sum postgres.dump postgres.list mail-db-blobs.list mail-blobs.list mail-blobs.tar.gz docker-compose.yml nginx-default.conf > SHA256SUMS
+)
 cat > "$dir/MANIFEST" <<EOF
 backup_format=poisk-v2
 created_at=$stamp
