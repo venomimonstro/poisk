@@ -17,3 +17,16 @@ func TestCapacityBenchmarkCommitRequiresExactSHA(t *testing.T){
 	got,err:=capacityBenchmarkCommit();if err!=nil{t.Fatal(err)}
 	if got!=valid{t.Fatalf("commit=%q",got)}
 }
+
+func TestCapacityBenchmarkReleaseVersionRequired(t *testing.T){
+	old,had:=os.LookupEnv("RELEASE_VERSION")
+	t.Cleanup(func(){if had{_ = os.Setenv("RELEASE_VERSION",old)}else{_ = os.Unsetenv("RELEASE_VERSION")}})
+	for _,value:=range []string{"","dev",string(make([]byte,129)),"candidate\nnext"}{
+		_ = os.Setenv("RELEASE_VERSION",value)
+		if _,err:=capacityBenchmarkReleaseVersion();err==nil{t.Fatalf("expected invalid release %q to fail",value)}
+	}
+	const valid="2026.09.27-rc1"
+	_ = os.Setenv("RELEASE_VERSION",valid)
+	got,err:=capacityBenchmarkReleaseVersion();if err!=nil{t.Fatal(err)}
+	if got!=valid{t.Fatalf("release=%q",got)}
+}
