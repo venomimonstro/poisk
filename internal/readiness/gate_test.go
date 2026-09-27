@@ -40,3 +40,9 @@ func TestEvidenceMaxAgePolicy(t *testing.T){
 	}
 	for kind,want:=range cases{if got:=evidenceMaxAge(kind);got!=want{t.Fatalf("kind=%s got=%s want=%s",kind,got,want)}}
 }
+
+func TestDeploymentEvidenceMustBeAfterReleasePreflight(t *testing.T){
+	deployment:=[]string{"BROWSER_SMOKE","SECURITY_REGRESSION","EDGE_TLS_PROXY","MTA_FLOW"}
+	for _,kind:=range deployment{if !evidenceRequiresPostPreflight(kind){t.Fatalf("%s must be post-preflight",kind)}}
+	for _,kind:=range []string{"BUILD_UNIT","INTEGRATION","FRESH_INSTALL","UPGRADE"}{if evidenceRequiresPostPreflight(kind){t.Fatalf("%s must be reusable for the exact commit/schema before staging",kind)}}
+}
