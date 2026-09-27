@@ -171,7 +171,7 @@ services:
       MAIL_BLOB_DIR: /mail-blobs
     volumes:
       - ./:/data-watch:ro
-      - mail_blob_data:/mail-blobs
+      - mail_blob_data:/mail-blobs:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -277,12 +277,15 @@ services:
     environment:
       POSTGRES_HOST: postgres
       BACKUP_ROOT: /backups
+      MAIL_BLOB_DIR: /mail-blobs
+      BACKUP_QUIESCED: ${BACKUP_QUIESCED:-no}
     command: ["sh", "/ops/backup.sh"]
     volumes:
       - ./deploy/backup:/ops:ro
       - ./data/backups:/backups
       - ./docker-compose.yml:/safe-config/docker-compose.yml:ro
       - ./deploy/nginx/default.conf:/safe-config/default.conf:ro
+      - mail_blob_data:/mail-blobs:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -296,13 +299,16 @@ services:
       - .env
     environment:
       POSTGRES_HOST: postgres
+      MAIL_BLOB_DIR: /mail-blobs
       RESTORE_DIR: ${RESTORE_DIR:-}
       RESTORE_CONFIRM: ${RESTORE_CONFIRM:-}
+      RESTORE_QUIESCED: ${RESTORE_QUIESCED:-no}
       RESTORE_ALLOW_NONEMPTY: ${RESTORE_ALLOW_NONEMPTY:-no}
     command: ["sh", "/ops/restore.sh"]
     volumes:
       - ./deploy/backup:/ops:ro
       - ./data/backups:/backups:ro
+      - mail_blob_data:/mail-blobs
     depends_on:
       postgres:
         condition: service_healthy
