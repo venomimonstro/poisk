@@ -9,8 +9,15 @@ The candidate must already be staged in the release registry and have a successf
 ```bash
 export RELEASE_VERSION=<staged-version>
 export READINESS_GIT_SHA=$(git rev-parse HEAD)
-export POSTGRES_DSN=<candidate-database-dsn>
+export POSTGRES_HOST=<candidate-db-host>
+export POSTGRES_PORT=5432
+export POSTGRES_DB=<candidate-db-name>
+export POSTGRES_USER=<candidate-db-user>
+export POSTGRES_PASSWORD=<candidate-db-password>
+export POSTGRES_SSLMODE=<candidate-sslmode>
 ```
+
+The application does not consume a generic `POSTGRES_DSN` environment variable. Readiness commands use the same canonical `POSTGRES_*` contract as the rest of the backend.
 
 `READINESS_GIT_SHA` must equal the checked-out HEAD and the tracked worktree must be clean.
 
@@ -43,14 +50,16 @@ Artifacts are stored outside the repository by default under `/tmp/poisk-readine
 
 ## Integration/security gate
 
-Set an isolated migrated PostgreSQL test DSN:
+Set an isolated migrated PostgreSQL test DSN for Go integration tests:
 
 ```bash
 export TEST_DATABASE_URL=<isolated-test-dsn>
 make release-gate
 ```
 
-The runner executes the full integration suite and then the security-sensitive package set separately. The test database must not be production and must be disposable.
+`TEST_DATABASE_URL` is consumed only by integration tests. It is separate from the candidate application's canonical `POSTGRES_*` connection variables. The test database must not be production and must be disposable.
+
+The runner executes the full integration suite and then the security-sensitive package set separately.
 
 ## Recording evidence
 
