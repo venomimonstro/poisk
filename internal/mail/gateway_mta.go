@@ -66,11 +66,16 @@ func (r Repository) LoadOutboundEnvelope(ctx context.Context,d OutboundDelivery,
 
 func (c MTAClient) Submit(ctx context.Context,envelope MTAEnvelope)(string,error){
 	if len(c.Secret)<32{return "",&MTAError{Permanent:true,Code:"MTA_CONFIG",Detail:"gateway secret is not configured"}}
-	base,err:=url.Parse(strings.TrimSpace(c.BaseURL));if err!=nil||base.Host==""||(base.Scheme!="http"&&base.Scheme!="https"){return "",&MTAError{Permanent:true,Code:"MTA_CONFIG",Detail:"invalid MTA base URL"}}
+	base,err:=url.Parse(strings.TrimSpace(c.BaseURL));if err!=nil||base.Host==""||(base.Scheme!="http"&&base.Scheme!="https")||base.User!=nil{return "",&MTAError{Permanent:true,Code:"MTA_CONFIG",Detail:"invalid MTA base URL"}}
 	base.Path=strings.TrimRight(base.Path,"/")+"/v1/outbound";base.RawQuery="";base.Fragment=""
 	body,err:=json.Marshal(envelope);if err!=nil{return "",err};nonceID,err:=randomUUID();if err!=nil{return "",err};eventID:="submit-"+nonceID;now:=time.Now().UTC();signature,err:=SignGatewayRequest(c.Secret,eventID,now,body);if err!=nil{return "",err}
 	req,err:=http.NewRequestWithContext(ctx,http.MethodPost,base.String(),bytes.NewReader(body));if err!=nil{return "",err};req.Header.Set("Content-Type","application/json");req.Header.Set("Accept","application/json");req.Header.Set("X-Poisk-Gateway-Event",eventID);req.Header.Set("X-Poisk-Gateway-Timestamp",fmt.Sprintf("%d",now.Unix()));req.Header.Set("X-Poisk-Gateway-Signature",signature)
-	client:=c.HTTP;if client==nil{client=&http.Client{Timeout:15*time.Second}}
+	baseClient:=c.HTTP;if baseClient==nil{baseClient=&http.Client{Timeout:15*time.Second}}
+	// Never follow MTA redirects. The request carries a signed envelope and the
+	// shared-gateway authentication headers; forwarding either to another
+	// origin through a 30x response would cross the trusted MTA boundary.
+	client:=*baseClient
+	client.CheckRedirect=func(_ *http.Request,_ []*http.Request)error{return http.ErrUseLastResponse}
 	resp,err:=client.Do(req);if err!=nil{return "",&MTAError{Permanent:false,Code:"MTA_UNAVAILABLE",Detail:err.Error()}};defer resp.Body.Close();payload,readErr:=io.ReadAll(io.LimitReader(resp.Body,64<<10));if readErr!=nil{return "",&MTAError{Permanent:false,Code:"MTA_RESPONSE",Detail:readErr.Error()}}
 	if resp.StatusCode<200||resp.StatusCode>=300{permanent:=resp.StatusCode>=400&&resp.StatusCode<500&&resp.StatusCode!=http.StatusTooManyRequests;return "",&MTAError{Permanent:permanent,Code:fmt.Sprintf("MTA_HTTP_%d",resp.StatusCode),Detail:strings.TrimSpace(string(payload))}}
 	var out mtaSubmitResponse;if err=json.Unmarshal(payload,&out);err!=nil||strings.TrimSpace(out.RemoteQueueID)==""||len(out.RemoteQueueID)>255{return "",&MTAError{Permanent:false,Code:"MTA_RESPONSE",Detail:"missing remote_queue_id"}};return strings.TrimSpace(out.RemoteQueueID),nil
