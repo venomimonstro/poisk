@@ -12,7 +12,7 @@ import (
 )
 
 func browserSecureCookies(env string)bool{
-	switch strings.ToLower(strings.TrimSpace(env)){case "dev","development","local","test":return false;default:return true}
+	switch strings.ToLower(strings.TrimSpace(env)){case "","dev","development","local","test":return false;default:return true}
 }
 
 func registerAccountRoutes(router chi.Router,apiGuard guard.Middleware,cfg config.Config,pool *pgxpool.Pool){
