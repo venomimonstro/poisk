@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -105,9 +106,11 @@ func Load() (Config, error) {
 	sslMode := getenv("POSTGRES_SSLMODE", "disable")
 
 	if password == "" { return Config{}, errors.New("POSTGRES_PASSWORD is required") }
+	if strings.TrimSpace(user)==""||strings.TrimSpace(db)==""||strings.TrimSpace(host)==""{return Config{},errors.New("PostgreSQL user, database and host are required")}
+	if _,err:=portValue("POSTGRES_PORT",pgPort);err!=nil{return Config{},err}
 	if cfg.MigrationsDir == "" { return Config{}, errors.New("MIGRATIONS_DIR is required") }
-
-	cfg.PostgresDSN = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s", user, password, host, pgPort, db, sslMode)
+	pgURL:=url.URL{Scheme:"postgres",User:url.UserPassword(user,password),Host:net.JoinHostPort(host,pgPort),Path:"/"+db}
+	query:=pgURL.Query();query.Set("sslmode",sslMode);pgURL.RawQuery=query.Encode();cfg.PostgresDSN=pgURL.String()
 	return cfg, nil
 }
 
