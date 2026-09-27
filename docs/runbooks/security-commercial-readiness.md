@@ -12,7 +12,7 @@ This runbook is the release gate for a commercial deployment. A code/static revi
 - Browser mutations require CSRF. Machine mail callbacks use bounded HMAC authentication, timestamp validation and replay protection.
 - Crawler/Webmaster fetches only use HTTP(S) ports 80/443, revalidate every redirect and re-resolve/validate DNS again at dial time. Private, loopback, link-local and metadata ranges are rejected.
 - Mail attachments are stored under the configured blob root with validated storage keys. Downloads are attachments with `nosniff`, private/no-store caching and CSP sandbox.
-- Internet Mail is disabled by default. The application submits only to the configured HTTPS MTA origin and never follows MTA redirects.
+- Internet Mail is disabled by default. The application submits only to the configured HTTP(S) MTA origin and never follows MTA redirects. Public SMTP relay policy belongs to the MTA edge and must be proven by runtime evidence; the application does not accept arbitrary client-supplied outbound envelope senders.
 
 ## Required runtime evidence
 
@@ -24,10 +24,10 @@ Required evidence types:
 - `INTEGRATION` — integration tests against migrated PostgreSQL, including tenant-isolation/security suites.
 - `FRESH_INSTALL` — empty database migrated to the exact repository migration set and service boot smoke.
 - `UPGRADE` — supported previous schema upgraded to the exact repository migration set without data loss.
-- `BROWSER_SMOKE` — Search, Account, Webmaster, Maps/Reviews, Mail and Admin browser paths.
-- `SECURITY_REGRESSION` — auth/session/CSRF/RBAC/tenant isolation, SSRF, path traversal, body limits, mail HMAC/replay and MTA redirect regression suite.
-- `EDGE_TLS_PROXY` — real HTTPS edge test proving redirect-to-HTTPS policy, secure cookies and correct proxy boundary.
-- `MTA_FLOW` — required only when Internet Mail is enabled; proves outbound submit, delivery/bounce callback, inbound delivery and replay rejection.
+- `BROWSER_SMOKE` — Search, Account, Webmaster, Maps/Reviews, Mail and Admin browser paths; max age 7 days.
+- `SECURITY_REGRESSION` — auth/session/CSRF/RBAC/tenant isolation, SSRF, path traversal, body limits, mail HMAC/replay and MTA abuse regression suite; max age 7 days.
+- `EDGE_TLS_PROXY` — real HTTPS edge test proving redirect-to-HTTPS policy, secure cookies and correct proxy boundary; max age 24 hours.
+- `MTA_FLOW` — required only when Internet Mail is enabled; proves outbound submit, delivery/bounce callback, inbound delivery, replay rejection and SMTP relay/sender policy; max age 24 hours.
 
 Each evidence artifact must have a SHA-256 digest. Record only a reference/path and digest; do not store passwords, session tokens, gateway secrets, DKIM private keys, payment payloads or raw MIME in readiness evidence.
 
@@ -51,11 +51,11 @@ Repeat for every required evidence type. A FAIL record is retained immutably and
 8. Run browser smoke for Search, Account, Webmaster, Maps/Reviews, Mail and Admin; record `BROWSER_SMOKE`.
 9. Run the security regression matrix; record `SECURITY_REGRESSION`.
 10. Verify the real HTTPS edge and secure-cookie behavior; record `EDGE_TLS_PROXY`.
-11. Run the Search Quality gate. The latest run must PASS and be no older than 7 days.
-12. Run an `ISOLATED_1M` Capacity benchmark with at least 1,000,000 measured documents, real server CPU/RAM/disk measurements and an ADR. It must be no older than 30 days.
-13. Run BACKUP and RESTORE drills against the current schema. Both latest drills must PASS and be no older than 30 days.
+11. Run the Search Quality gate with the same `READINESS_GIT_SHA`. The stored quality run must belong to the exact candidate commit/schema, PASS and be no older than 7 days.
+12. Run an `ISOLATED_1M` Capacity benchmark with the same `READINESS_GIT_SHA`, at least 1,000,000 measured documents, real server CPU/RAM/disk measurements and an ADR. The snapshot must belong to the exact candidate commit/schema, contain no HIGH bottlenecks and be no older than 30 days.
+13. Run BACKUP and RESTORE drills with the same `READINESS_GIT_SHA`. Both drills must belong to the exact candidate commit/schema, include artifact ref + SHA-256 + positive byte size + positive duration, PASS and be no older than 30 days.
 14. Confirm `resource_pressure` is fresh and not CRITICAL.
-15. If Internet Mail is enabled: verify DNS readiness for the currently configured `MAIL_DOMAIN + MAIL_DKIM_SELECTOR` with no drift, run the real MTA flow, and record `MTA_FLOW`.
+15. If Internet Mail is enabled: verify DNS readiness for the currently configured `MAIL_DOMAIN + MAIL_DKIM_SELECTOR` with no drift, run the full MTA abuse/delivery matrix below, and record fresh `MTA_FLOW` evidence.
 16. Run:
 
 ```text
@@ -83,8 +83,24 @@ Only `ready=true` permits a commercial release.
 - Proxy/body limits: every mutating Next proxy has an explicit path allowlist and bounded body; no generic internal backend tunnel exists.
 - Files: storage keys cannot escape blob/map/import roots; user filenames never select server paths and attachment names reject control characters.
 - Mail machine boundary: HMAC signature, bounded clock skew, replay rejection, bounded bodies, no MTA redirects.
+- Internet Mail MTA: unauthenticated external→external SMTP relay is rejected; arbitrary/forged outbound envelope sender is rejected; unknown local RCPT is rejected before message acceptance; known local alias routes only to its mapped mailbox; duplicate inbound event is idempotent; same event ID with changed body/recipient is rejected; forged callback/HMAC is rejected; bounce/suppression path does not recursively generate uncontrolled mail.
 - Privacy/logging: routine diagnostics do not expose password hashes, session/CSRF/token hashes, raw gateway secrets, DKIM private keys, raw payment event payloads, raw MIME, or full recipient lists.
 - Operator CLI: passwords/raw provider payloads are not passed in argv; secrets use stdin or server-side environment/secret storage as documented.
+
+## Internet Mail runtime matrix
+
+When Internet Mail is enabled, `MTA_FLOW` is not satisfied by a single successful message. The artifact must record all of these outcomes for the exact release:
+
+1. authenticated local mailbox → external recipient: accepted and delivery callback reconciled;
+2. external sender → existing local alias: accepted once and visible only in the mapped mailbox;
+3. external sender → unknown local alias: rejected;
+4. external sender → external recipient through the public SMTP edge: relay rejected;
+5. attempt to submit outbound mail with an envelope sender not owned by the authenticated/local mailbox: rejected;
+6. repeated gateway callback/event: idempotent/replay rejected as designed;
+7. same event identifier with changed signed body or recipient: rejected as mismatch;
+8. permanent delivery failure creates suppression/bounce state without an uncontrolled bounce loop;
+9. attachment/body size limits are enforced at MTA and application gateway boundaries;
+10. DKIM signing, SPF policy and DMARC alignment/readiness match the configured domain/selector snapshot.
 
 ## Incident actions
 
@@ -114,7 +130,7 @@ Only `ready=true` permits a commercial release.
 
 1. Stop writes/heavy workers as appropriate.
 2. Use the immutable release registry to select the previous validated release; do not ad-hoc edit release state.
-3. Use the latest verified current-schema backup and the recovery procedure. A backup without a successful restore drill is not considered sufficient evidence.
+3. Use the latest verified **exact-release** backup and recovery procedure. A backup without a successful restore drill for the same commit/schema is not sufficient evidence.
 4. After restore, verify migration set, canonical counts, index consistency and Search/Map/Webmaster/Mail smoke before reopening writes.
 5. Record new recovery and readiness evidence; never reuse evidence from a different commit/schema/release manifest.
 
@@ -126,4 +142,4 @@ Only `ready=true` permits a commercial release.
 
 ## Launch verdict
 
-If any required evidence is missing, stale, FAIL, tied to another commit/schema/release manifest, or if any known P0/P1 remains unresolved, the verdict is **NOT READY**. Missing runtime evidence must never be converted into a code/static PASS.
+If any required evidence is missing, stale, FAIL, tied to another commit/schema/release manifest, contains a HIGH Capacity bottleneck, or if any known P0/P1 remains unresolved, the verdict is **NOT READY**. Missing runtime evidence must never be converted into a code/static PASS.
