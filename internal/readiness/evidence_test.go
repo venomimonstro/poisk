@@ -16,3 +16,9 @@ func TestContainsSensitiveEvidenceKey(t *testing.T){
 	}
 	for _,tc:=range cases{t.Run(tc.name,func(t *testing.T){if got:=containsSensitiveEvidenceKey(tc.value);got!=tc.want{t.Fatalf("got %v want %v",got,tc.want)}})}
 }
+
+func TestHasControl(t *testing.T){
+	if hasControl("release\nspoof")==false{t.Fatal("newline must be rejected")}
+	if hasControl("artifact\x7fref")==false{t.Fatal("DEL must be rejected")}
+	if hasControl("release-2026.09.27"){t.Fatal("ordinary metadata must be allowed")}
+}
