@@ -21,7 +21,7 @@ func runReadinessCtl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,ar
 	commit:=strings.ToLower(strings.TrimSpace(os.Getenv("READINESS_GIT_SHA")));if commit==""{return errors.New("READINESS_GIT_SHA is required and must be the exact 40-character commit under test")}
 	switch args[0]{
 	case "check":
-		gate:=readiness.Gate{DB:pool,ExpectedVersions:versions,GitCommit:commit,InternetMail:internetMailEnabled()}
+		gate:=readiness.Gate{DB:pool,ExpectedVersions:versions,GitCommit:commit,InternetMail:cfg.MailInternetEnabled,MailDomain:cfg.MailDomain,MailSelector:strings.TrimSpace(os.Getenv("MAIL_DKIM_SELECTOR"))}
 		report,err:=gate.Evaluate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Ready{return errors.New("commercial readiness gate failed")};return nil
 	case "record":
 		if len(args)<6{return errors.New("usage: readinessctl record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json]")}
