@@ -42,10 +42,11 @@ func runUpgradeDatabaseCheck(ctx context.Context,cfg config.Config,expected []in
 }
 
 func upgradeInstallDSN()(string,string,int64,error){
-	host:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_HOST"));port:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_PORT"));db:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_DB"));user:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_USER"));password:=os.Getenv("READINESS_UPGRADE_POSTGRES_PASSWORD");sslmode:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_SSLMODE"));fromRaw:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_FROM_SCHEMA"))
+	host:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_HOST"));port:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_PORT"));db:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_DB"));user:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_USER"));password:=os.Getenv("READINESS_UPGRADE_POSTGRES_PASSWORD");sslmode:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_POSTGRES_SSLMODE"));fromRaw:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_FROM_SCHEMA"));confirm:=strings.TrimSpace(os.Getenv("READINESS_UPGRADE_CONFIRM"))
 	if port==""{port="5432"};if sslmode==""{sslmode="disable"};if host==""||db==""||user==""||password==""||fromRaw==""{return "","",0,errors.New("READINESS_UPGRADE_POSTGRES_HOST/DB/USER/PASSWORD and READINESS_UPGRADE_FROM_SCHEMA are required")}
 	p,err:=strconv.Atoi(port);if err!=nil||p<1||p>65535{return "","",0,errors.New("invalid READINESS_UPGRADE_POSTGRES_PORT")};from,err:=strconv.ParseInt(fromRaw,10,64);if err!=nil||from<=0{return "","",0,errors.New("invalid READINESS_UPGRADE_FROM_SCHEMA")}
 	lowerDB:=strings.ToLower(db);if !(strings.Contains(lowerDB,"readiness")||strings.Contains(lowerDB,"test")){return "","",0,errors.New("upgrade database name must contain readiness or test")};if len(db)>63||strings.ContainsAny(db,"/\\\x00\r\n\t"){return "","",0,errors.New("invalid upgrade database name")}
+	if confirm!="UPGRADE:"+db{return "","",0,errors.New("READINESS_UPGRADE_CONFIRM must equal UPGRADE:<database>")}
 	u:=url.URL{Scheme:"postgres",User:url.UserPassword(user,password),Host:net.JoinHostPort(host,port),Path:"/"+db};q:=u.Query();q.Set("sslmode",sslmode);u.RawQuery=q.Encode();return u.String(),db,from,nil
 }
 
