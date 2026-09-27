@@ -37,7 +37,7 @@ func (r Repository) Preflight(ctx context.Context,version,actor string)(Prefligh
 	pass:=dbSchema>=manifest.RequiredSchemaVersion&&manifest.WebIndexSchema==indexmanticore.WebSchemaVersion&&manifest.OrganizationIndexSchema==indexmanticore.OrganizationsSchemaVersion&&manifest.AddressIndexSchema==indexmanticore.AddressesSchemaVersion&&(manifest.MapVersion==""||manifest.MapVersion==activeMap)&&manifest.BackendImage!=""&&manifest.FrontendImage!=""
 	result:=Preflight{Pass:pass,DatabaseSchema:dbSchema,RequiredSchema:manifest.RequiredSchemaVersion,ActiveMap:activeMap,RequiredMap:manifest.MapVersion}
 	if !pass{_,_=r.DB.Exec(ctx,`INSERT INTO release_events(release_id,action,actor,details) VALUES($1,'FAIL',$2,jsonb_build_object('database_schema',$3,'active_map',$4))`,manifest.ID,actor,dbSchema,activeMap);return result,ErrPreflight}
-	if _,err=r.DB.Exec(ctx,`UPDATE app_releases SET preflight_at=now() WHERE release_id=$1`,manifest.ID);err!=nil{return result,err}
+	if _,err=r.DB.Exec(ctx,`UPDATE app_releases SET preflight_at=COALESCE(preflight_at,now()) WHERE release_id=$1`,manifest.ID);err!=nil{return result,err}
 	if _,err=r.DB.Exec(ctx,`INSERT INTO release_events(release_id,action,actor,details) VALUES($1,'PREFLIGHT',$2,'{}')`,manifest.ID,actor);err!=nil{return result,err}
 	return result,nil
 }
