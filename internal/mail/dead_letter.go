@@ -14,12 +14,11 @@ const MaxManualDeadRetries = 3
 func RetryableDeadCode(code string) bool {
 	code=strings.ToUpper(strings.TrimSpace(code))
 	switch code {
-	case "SUBMITTED_STALE","MTA_UNAVAILABLE","MTA_RESPONSE","MTA_ERROR":
-		return true
-	case "MTA_HTTP_429":
+	case "SUBMITTED_STALE","MTA_UNAVAILABLE","MTA_RESPONSE","MTA_ERROR","MTA_HTTP_429":
 		return true
 	}
-	return strings.HasPrefix(code,"MTA_HTTP_5") && len(code)==12
+	if len(code)!=12||!strings.HasPrefix(code,"MTA_HTTP_5"){return false}
+	return code[10]>='0'&&code[10]<='9'&&code[11]>='0'&&code[11]<='9'
 }
 
 type DeadLetter struct {
