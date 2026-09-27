@@ -34,6 +34,17 @@ func TestLoadRejectsInvalidManticorePort(t *testing.T) {
 	}
 }
 
+func TestLoadProductionRequiresHTTPSPublicOrigin(t *testing.T){
+	t.Setenv("POSTGRES_PASSWORD","secret");t.Setenv("APP_ENV","production");t.Setenv("PUBLIC_BASE_URL","")
+	if _,err:=Load();err==nil{t.Fatal("expected missing public HTTPS origin rejection")}
+	t.Setenv("PUBLIC_BASE_URL","http://search.example.test")
+	if _,err:=Load();err==nil{t.Fatal("expected HTTP public origin rejection")}
+	t.Setenv("PUBLIC_BASE_URL","https://search.example.test/app")
+	if _,err:=Load();err==nil{t.Fatal("expected public origin path rejection")}
+	t.Setenv("PUBLIC_BASE_URL","https://search.example.test/")
+	cfg,err:=Load();if err!=nil{t.Fatalf("Load() error = %v",err)};if cfg.PublicBaseURL!="https://search.example.test"{t.Fatalf("public base=%q",cfg.PublicBaseURL)}
+}
+
 func TestLoadInternetMailUsesCanonicalVariables(t *testing.T) {
 	t.Setenv("POSTGRES_PASSWORD", "secret")
 	t.Setenv("MAIL_INTERNET_ENABLED", "true")
