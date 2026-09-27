@@ -3,7 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -30,9 +30,8 @@ type Config struct {
 	MapArtifactRoot      string
 	MapPublicPrefix      string
 	MailInternetEnabled  bool
-	MailPublicDomain     string
-	MailRelayAddr        string
-	MailGatewaySecretFile string
+	MailDomain           string
+	MailMTABaseURL       string
 }
 
 func Load() (Config, error) {
@@ -44,9 +43,8 @@ func Load() (Config, error) {
 		MigrationsDir:   getenv("MIGRATIONS_DIR", "/app/db/migrations"),
 		MapArtifactRoot: getenv("MAP_ARTIFACT_ROOT", "/srv/maps"),
 		MapPublicPrefix: getenv("MAP_PUBLIC_PREFIX", "/maps"),
-		MailPublicDomain: strings.ToLower(strings.TrimSpace(os.Getenv("MAIL_PUBLIC_DOMAIN"))),
-		MailRelayAddr: strings.TrimSpace(os.Getenv("MAIL_RELAY_ADDR")),
-		MailGatewaySecretFile: strings.TrimSpace(os.Getenv("MAIL_GATEWAY_SECRET_FILE")),
+		MailDomain:      strings.ToLower(strings.TrimSpace(os.Getenv("MAIL_DOMAIN"))),
+		MailMTABaseURL:  strings.TrimSpace(os.Getenv("MAIL_MTA_BASE_URL")),
 	}
 
 	shutdown, err := positiveDuration("APP_SHUTDOWN_TIMEOUT", "10s")
@@ -80,9 +78,10 @@ func Load() (Config, error) {
 
 	mailEnabled,err:=strconv.ParseBool(getenv("MAIL_INTERNET_ENABLED","false"));if err!=nil{return Config{},errors.New("invalid MAIL_INTERNET_ENABLED")};cfg.MailInternetEnabled=mailEnabled
 	if cfg.MailInternetEnabled{
-		if !validMailDomain(cfg.MailPublicDomain){return Config{},errors.New("invalid MAIL_PUBLIC_DOMAIN")}
-		if _,_,err:=net.SplitHostPort(cfg.MailRelayAddr);err!=nil{return Config{},errors.New("invalid MAIL_RELAY_ADDR")}
-		if !strings.HasPrefix(cfg.MailGatewaySecretFile,"/")||strings.Contains(cfg.MailGatewaySecretFile,".."){return Config{},errors.New("MAIL_GATEWAY_SECRET_FILE must be an absolute safe path")}
+		if !validMailDomain(cfg.MailDomain){return Config{},errors.New("invalid MAIL_DOMAIN")}
+		mtaURL,parseErr:=url.Parse(cfg.MailMTABaseURL)
+		if parseErr!=nil||mtaURL.Scheme!="https"||mtaURL.Hostname()==""||mtaURL.User!=nil||mtaURL.RawQuery!=""||mtaURL.Fragment!=""{return Config{},errors.New("MAIL_MTA_BASE_URL must be an https origin without credentials, query or fragment")}
+		if len(strings.TrimSpace(os.Getenv("MAIL_GATEWAY_SHARED_SECRET")))<32{return Config{},errors.New("MAIL_GATEWAY_SHARED_SECRET must be at least 32 bytes")}
 	}
 
 	if strings.TrimSpace(cfg.MapArtifactRoot)=="" { return Config{}, errors.New("MAP_ARTIFACT_ROOT is required") }
