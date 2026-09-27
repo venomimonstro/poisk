@@ -28,6 +28,16 @@ func TestOutboundLeaseIsExclusiveAndWorkerOwned(t *testing.T){
 	var status,remote string;if err=pool.QueryRow(ctx,`SELECT status,COALESCE(remote_queue_id,'') FROM mail_outbound_deliveries WHERE delivery_id=$1`,seed.ID).Scan(&status,&remote);err!=nil{t.Fatal(err)};if status!="DELIVERED"||remote!="remote-1"{t.Fatalf("status=%s remote=%s",status,remote)}
 }
 
+func TestOutboundLeaseRespectsDomainCooldown(t *testing.T){
+	pool:=mailDB(t);repo:=Repository{DB:pool};ctx:=context.Background();seed:=seedOutboundDelivery(t,repo);now:=time.Now().UTC()
+	if _,err:=pool.Exec(ctx,`INSERT INTO mail_domain_delivery_pressure(domain,transient_failures,window_started_at,cooldown_until,updated_at) VALUES('example.net',3,$1,$2,$1)
+ON CONFLICT(domain) DO UPDATE SET transient_failures=3,window_started_at=$1,cooldown_until=$2,updated_at=$1`,now,now.Add(5*time.Minute));err!=nil{t.Fatal(err)}
+	t.Cleanup(func(){_,_=pool.Exec(context.Background(),`DELETE FROM mail_domain_delivery_pressure WHERE domain='example.net'`)})
+
+	blocked,err:=repo.LeaseOutbound(ctx,"worker-cooldown",1,time.Minute,now);if err!=nil{t.Fatal(err)};if len(blocked)!=0{t.Fatalf("delivery leased during cooldown: %+v",blocked)}
+	leased,err:=repo.LeaseOutbound(ctx,"worker-cooldown",1,time.Minute,now.Add(6*time.Minute));if err!=nil{t.Fatal(err)};if len(leased)!=1||leased[0].ID!=seed.ID{t.Fatalf("lease after cooldown=%+v",leased)}
+}
+
 func TestExpiredLeaseRecoversAndRetriesToDead(t *testing.T){
 	pool:=mailDB(t);repo:=Repository{DB:pool};ctx:=context.Background();seed:=seedOutboundDelivery(t,repo);base:=time.Now().UTC()
 	leased,err:=repo.LeaseOutbound(ctx,"worker-a",1,time.Second,base);if err!=nil||len(leased)!=1{t.Fatalf("lease=%+v err=%v",leased,err)}
