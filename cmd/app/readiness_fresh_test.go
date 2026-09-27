@@ -7,7 +7,7 @@ import (
 )
 
 func setFreshEnv(t *testing.T,db string){
-	t.Helper();t.Setenv("READINESS_FRESH_POSTGRES_HOST","127.0.0.1");t.Setenv("READINESS_FRESH_POSTGRES_PORT","5432");t.Setenv("READINESS_FRESH_POSTGRES_DB",db);t.Setenv("READINESS_FRESH_POSTGRES_USER","poisk_test");t.Setenv("READINESS_FRESH_POSTGRES_PASSWORD","secret-value");t.Setenv("READINESS_FRESH_POSTGRES_SSLMODE","disable")
+	t.Helper();t.Setenv("READINESS_FRESH_POSTGRES_HOST","127.0.0.1");t.Setenv("READINESS_FRESH_POSTGRES_PORT","5432");t.Setenv("READINESS_FRESH_POSTGRES_DB",db);t.Setenv("READINESS_FRESH_POSTGRES_USER","poisk_test");t.Setenv("READINESS_FRESH_POSTGRES_PASSWORD","secret-value");t.Setenv("READINESS_FRESH_POSTGRES_SSLMODE","disable");t.Setenv("READINESS_FRESH_CONFIRM","MIGRATE:"+db)
 }
 
 func TestFreshInstallDSNRequiresDisposableDatabaseName(t *testing.T){
@@ -24,6 +24,11 @@ func TestFreshInstallDSNAcceptsReadinessDatabase(t *testing.T){
 func TestFreshInstallDSNRejectsMissingPassword(t *testing.T){
 	setFreshEnv(t,"poisk_readiness_test");t.Setenv("READINESS_FRESH_POSTGRES_PASSWORD","")
 	if _,_,err:=freshInstallDSN();err==nil{t.Fatal("expected missing password rejection")}
+}
+
+func TestFreshInstallDSNRejectsWrongConfirmation(t *testing.T){
+	setFreshEnv(t,"poisk_readiness_test");t.Setenv("READINESS_FRESH_CONFIRM","MIGRATE:other")
+	if _,_,err:=freshInstallDSN();err==nil{t.Fatal("expected explicit confirmation rejection")}
 }
 
 func TestSameInt64s(t *testing.T){
