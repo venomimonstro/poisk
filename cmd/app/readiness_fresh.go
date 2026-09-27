@@ -41,12 +41,13 @@ func runFreshInstallDatabaseCheck(ctx context.Context,cfg config.Config,expected
 }
 
 func freshInstallDSN()(string,string,error){
-	host:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_HOST"));port:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_PORT"));db:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_DB"));user:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_USER"));password:=os.Getenv("READINESS_FRESH_POSTGRES_PASSWORD");sslmode:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_SSLMODE"))
+	host:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_HOST"));port:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_PORT"));db:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_DB"));user:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_USER"));password:=os.Getenv("READINESS_FRESH_POSTGRES_PASSWORD");sslmode:=strings.TrimSpace(os.Getenv("READINESS_FRESH_POSTGRES_SSLMODE"));confirm:=strings.TrimSpace(os.Getenv("READINESS_FRESH_CONFIRM"))
 	if port==""{port="5432"};if sslmode==""{sslmode="disable"}
 	if host==""||db==""||user==""||password==""{return "","",errors.New("READINESS_FRESH_POSTGRES_HOST/DB/USER/PASSWORD are required")}
 	p,err:=strconv.Atoi(port);if err!=nil||p<1||p>65535{return "","",errors.New("invalid READINESS_FRESH_POSTGRES_PORT")}
 	lowerDB:=strings.ToLower(db);if !(strings.Contains(lowerDB,"readiness")||strings.Contains(lowerDB,"test")){return "","",errors.New("fresh-install database name must contain readiness or test")}
 	if len(db)>63||strings.ContainsAny(db,"/\\\x00\r\n\t"){return "","",errors.New("invalid fresh-install database name")}
+	if confirm!="MIGRATE:"+db{return "","",errors.New("READINESS_FRESH_CONFIRM must equal MIGRATE:<database>")}
 	u:=url.URL{Scheme:"postgres",User:url.UserPassword(user,password),Host:net.JoinHostPort(host,port),Path:"/"+db};q:=u.Query();q.Set("sslmode",sslmode);u.RawQuery=q.Encode();return u.String(),db,nil
 }
 
