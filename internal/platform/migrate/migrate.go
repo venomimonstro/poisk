@@ -51,14 +51,22 @@ func Up(ctx context.Context, db *pgxpool.Pool, dir string) error {
 	return nil
 }
 
-// LatestVersion returns the highest unique migration version available in dir.
-// It uses the same parser and duplicate-version validation as Up so readiness
-// checks cannot disagree with the migration runner about repository schema.
-func LatestVersion(dir string) (int64, error) {
+// ExpectedVersions returns the exact ordered migration-version set in dir.
+// It shares Up's parsing and duplicate validation, so launch-readiness checks
+// cannot silently accept a missing migration in the middle of the chain.
+func ExpectedVersions(dir string) ([]int64, error) {
 	migrations, err := loadMigrations(dir)
+	if err != nil { return nil, err }
+	if len(migrations) == 0 { return nil, fmt.Errorf("no migrations found in %s", dir) }
+	versions := make([]int64, len(migrations))
+	for i, m := range migrations { versions[i] = m.version }
+	return versions, nil
+}
+
+func LatestVersion(dir string) (int64, error) {
+	versions, err := ExpectedVersions(dir)
 	if err != nil { return 0, err }
-	if len(migrations) == 0 { return 0, fmt.Errorf("no migrations found in %s", dir) }
-	return migrations[len(migrations)-1].version, nil
+	return versions[len(versions)-1], nil
 }
 
 func loadMigrations(dir string) ([]migration, error) {
