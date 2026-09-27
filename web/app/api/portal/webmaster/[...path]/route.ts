@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ProxyBodyTooLarge, readLimitedProxyBody } from "../../../_proxyBody";
 
 const internalBase = (process.env.API_INTERNAL_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+const maxBodyBytes = 64 * 1024;
 
 function allowed(path: string[], method: string) {
   if (path.length === 1 && path[0] === "sites") return method === "GET" || method === "POST";
@@ -24,7 +26,7 @@ async function proxy(request: NextRequest, path: string[]) {
     if (cookie) headers.set("Cookie", cookie);
     if (csrf) headers.set("X-CSRF-Token", csrf);
     if (contentType) headers.set("Content-Type", contentType);
-    const body = request.method === "GET" ? undefined : await request.text();
+    const body = request.method === "GET" ? undefined : await readLimitedProxyBody(request, maxBodyBytes);
     const query = request.nextUrl.search || "";
     const upstream = await fetch(`${internalBase}/api/portal/webmaster/${path.join("/")}${query}`, {
       method: request.method,
@@ -43,7 +45,8 @@ async function proxy(request: NextRequest, path: string[]) {
         "X-Content-Type-Options": "nosniff",
       },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof ProxyBodyTooLarge) return NextResponse.json({ error: "body_too_large" }, { status: 413 });
     return NextResponse.json({ error: "webmaster_backend_error" }, { status: 502 });
   } finally {
     clearTimeout(timer);
