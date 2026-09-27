@@ -1,0 +1,122 @@
+package readiness
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"regexp"
+	"sort"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+type Check struct {
+	Name string `json:"name"`
+	Pass bool `json:"pass"`
+	Detail string `json:"detail"`
+}
+
+type Report struct {
+	Ready bool `json:"ready"`
+	GitCommit string `json:"git_commit"`
+	ExpectedSchema int64 `json:"expected_schema"`
+	AppliedSchema int64 `json:"applied_schema"`
+	CheckedAt time.Time `json:"checked_at"`
+	Checks []Check `json:"checks"`
+}
+
+type Gate struct {
+	DB *pgxpool.Pool
+	ExpectedVersions []int64
+	GitCommit string
+	InternetMail bool
+	Now func() time.Time
+}
+
+func (g Gate) Evaluate(ctx context.Context) (Report, error) {
+	if g.DB==nil{return Report{},errors.New("readiness database is not initialized")}
+	if len(g.ExpectedVersions)==0{return Report{},errors.New("expected migration versions are required")}
+	if !commitPattern.MatchString(g.GitCommit){return Report{},errors.New("git commit must be a lowercase 40-character SHA")}
+	now:=time.Now().UTC();if g.Now!=nil{now=g.Now().UTC()}
+	expected:=append([]int64(nil),g.ExpectedVersions...);sort.Slice(expected,func(i,j int)bool{return expected[i]<expected[j]})
+	report:=Report{Ready:true,GitCommit:g.GitCommit,ExpectedSchema:expected[len(expected)-1],CheckedAt:now}
+	add:=func(name string,pass bool,detail string){report.Checks=append(report.Checks,Check{Name:name,Pass:pass,Detail:detail});if !pass{report.Ready=false}}
+
+	applied,err:=g.appliedVersions(ctx);if err!=nil{return Report{},fmt.Errorf("read applied migrations: %w",err)}
+	if len(applied)>0{report.AppliedSchema=applied[len(applied)-1]}
+	missing,unexpected:=diffVersions(expected,applied)
+	add("migrations_exact",len(missing)==0&&len(unexpected)==0,fmt.Sprintf("missing=%v unexpected=%v",missing,unexpected))
+
+	for _,kind:=range []string{"BUILD_UNIT","INTEGRATION","FRESH_INSTALL","UPGRADE","BROWSER_SMOKE"}{
+		pass,detail,err:=g.evidence(ctx,kind,report.ExpectedSchema);if err!=nil{return Report{},err};add("evidence_"+kind,pass,detail)
+	}
+
+	qualityPass,qualityDetail,err:=g.quality(ctx,now);if err!=nil{return Report{},err};add("quality_gate",qualityPass,qualityDetail)
+	capacityPass,capacityDetail,err:=g.capacity(ctx,now);if err!=nil{return Report{},err};add("capacity_1m",capacityPass,capacityDetail)
+	backupPass,backupDetail,err:=g.recovery(ctx,"BACKUP",report.ExpectedSchema);if err!=nil{return Report{},err};add("recovery_backup",backupPass,backupDetail)
+	restorePass,restoreDetail,err:=g.recovery(ctx,"RESTORE",report.ExpectedSchema);if err!=nil{return Report{},err};add("recovery_restore",restorePass,restoreDetail)
+	pressurePass,pressureDetail,err:=g.resourcePressure(ctx,now);if err!=nil{return Report{},err};add("resource_pressure",pressurePass,pressureDetail)
+
+	if g.InternetMail{
+		mtaPass,mtaDetail,err:=g.evidence(ctx,"MTA_FLOW",report.ExpectedSchema);if err!=nil{return Report{},err};add("evidence_MTA_FLOW",mtaPass,mtaDetail)
+		dnsPass,dnsDetail,err:=g.mailDNS(ctx,now);if err!=nil{return Report{},err};add("mail_dns",dnsPass,dnsDetail)
+	}
+	return report,nil
+}
+
+func (g Gate) appliedVersions(ctx context.Context)([]int64,error){
+	rows,err:=g.DB.Query(ctx,`SELECT version FROM schema_migrations ORDER BY version`);if err!=nil{return nil,err};defer rows.Close();out:=[]int64{};for rows.Next(){var v int64;if err:=rows.Scan(&v);err!=nil{return nil,err};out=append(out,v)};return out,rows.Err()
+}
+
+func diffVersions(expected,applied []int64)(missing,unexpected []int64){
+	e:=map[int64]struct{}{};a:=map[int64]struct{}{};for _,v:=range expected{e[v]=struct{}{}};for _,v:=range applied{a[v]=struct{}{}}
+	for _,v:=range expected{if _,ok:=a[v];!ok{missing=append(missing,v)}};for _,v:=range applied{if _,ok:=e[v];!ok{unexpected=append(unexpected,v)}};return
+}
+
+func (g Gate) evidence(ctx context.Context,kind string,schema int64)(bool,string,error){
+	var status,commit,artifact string;var recordedSchema int64;var completed time.Time
+	err:=g.DB.QueryRow(ctx,`SELECT status,git_commit,database_schema,artifact_ref,completed_at FROM commercial_readiness_evidence WHERE evidence_type=$1 AND git_commit=$2 AND database_schema=$3 ORDER BY completed_at DESC,evidence_id DESC LIMIT 1`,kind,g.GitCommit,schema).Scan(&status,&commit,&recordedSchema,&artifact,&completed)
+	if errors.Is(err,pgx.ErrNoRows){return false,"missing PASS evidence for current commit/schema",nil};if err!=nil{return false,"",err}
+	return status=="PASS",fmt.Sprintf("status=%s commit=%s schema=%d artifact=%s completed_at=%s",status,commit,recordedSchema,artifact,completed.UTC().Format(time.RFC3339)),nil
+}
+
+func (g Gate) quality(ctx context.Context,now time.Time)(bool,string,error){
+	var pass bool;var completed time.Time;var failuresRaw []byte
+	err:=g.DB.QueryRow(ctx,`SELECT gate_pass,completed_at,gate_failures FROM quality_runs ORDER BY completed_at DESC,run_id DESC LIMIT 1`).Scan(&pass,&completed,&failuresRaw)
+	if errors.Is(err,pgx.ErrNoRows){return false,"no quality run",nil};if err!=nil{return false,"",err}
+	var failures []string;_ = json.Unmarshal(failuresRaw,&failures);fresh:=now.Sub(completed.UTC())<=7*24*time.Hour&&completed.Before(now.Add(5*time.Minute))
+	return pass&&fresh,fmt.Sprintf("pass=%v fresh_7d=%v completed_at=%s failures=%v",pass,fresh,completed.UTC().Format(time.RFC3339),failures),nil
+}
+
+func (g Gate) capacity(ctx context.Context,now time.Time)(bool,string,error){
+	var runID,snapshotID,measured int64;var completed time.Time;var hasADR bool
+	err:=g.DB.QueryRow(ctx,`SELECT r.run_id,s.snapshot_id,s.measured_documents,r.completed_at,EXISTS(SELECT 1 FROM capacity_adr_decisions a WHERE a.snapshot_id=s.snapshot_id) FROM capacity_benchmark_runs r JOIN capacity_snapshots s ON s.run_id=r.run_id WHERE r.status='COMPLETED' AND r.mode='ISOLATED_1M' AND s.measured_documents>=1000000 ORDER BY r.completed_at DESC,r.run_id DESC LIMIT 1`).Scan(&runID,&snapshotID,&measured,&completed,&hasADR)
+	if errors.Is(err,pgx.ErrNoRows){return false,"no completed ISOLATED_1M snapshot with >=1,000,000 documents",nil};if err!=nil{return false,"",err}
+	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute));return hasADR&&fresh,fmt.Sprintf("run_id=%d snapshot_id=%d measured=%d adr=%v fresh_30d=%v completed_at=%s",runID,snapshotID,measured,hasADR,fresh,completed.UTC().Format(time.RFC3339)),nil
+}
+
+func (g Gate) recovery(ctx context.Context,kind string,schema int64)(bool,string,error){
+	var status string;var recordedSchema int64;var completed time.Time;var artifact *string
+	err:=g.DB.QueryRow(ctx,`SELECT status,database_schema,completed_at,artifact_ref FROM recovery_drills WHERE drill_type=$1 ORDER BY completed_at DESC,drill_id DESC LIMIT 1`,kind).Scan(&status,&recordedSchema,&completed,&artifact)
+	if errors.Is(err,pgx.ErrNoRows){return false,"no recovery drill",nil};if err!=nil{return false,"",err}
+	return status=="PASS"&&recordedSchema==schema,fmt.Sprintf("status=%s schema=%d expected_schema=%d artifact=%v completed_at=%s",status,recordedSchema,schema,artifact,completed.UTC().Format(time.RFC3339)),nil
+}
+
+func (g Gate) resourcePressure(ctx context.Context,now time.Time)(bool,string,error){
+	var state string;var updated time.Time
+	err:=g.DB.QueryRow(ctx,`SELECT COALESCE(value->>'state',''),updated_at FROM system_settings WHERE key='resource_pressure'`).Scan(&state,&updated)
+	if errors.Is(err,pgx.ErrNoRows){return false,"resource pressure state missing",nil};if err!=nil{return false,"",err}
+	fresh:=now.Sub(updated.UTC())<=2*time.Minute&&updated.Before(now.Add(5*time.Minute));return fresh&&state!="CRITICAL"&&state!="",fmt.Sprintf("state=%s fresh_2m=%v updated_at=%s",state,fresh,updated.UTC().Format(time.RFC3339)),nil
+}
+
+func (g Gate) mailDNS(ctx context.Context,now time.Time)(bool,string,error){
+	var ready,drift bool;var domain,selector string;var checked time.Time;var reasons []string
+	err:=g.DB.QueryRow(ctx,`SELECT domain,selector,ready,drift,reasons,checked_at FROM mail_dns_readiness_snapshots ORDER BY checked_at DESC,snapshot_id DESC LIMIT 1`).Scan(&domain,&selector,&ready,&drift,&reasons,&checked)
+	if errors.Is(err,pgx.ErrNoRows){return false,"no mail DNS readiness snapshot",nil};if err!=nil{return false,"",err}
+	fresh:=now.Sub(checked.UTC())<=30*time.Minute&&checked.Before(now.Add(5*time.Minute));return ready&&!drift&&fresh,fmt.Sprintf("domain=%s selector=%s ready=%v drift=%v fresh_30m=%v reasons=%v checked_at=%s",domain,selector,ready,drift,fresh,reasons,checked.UTC().Format(time.RFC3339)),nil
+}
