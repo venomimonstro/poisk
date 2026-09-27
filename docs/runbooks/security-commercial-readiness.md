@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This runbook is the release gate for a commercial deployment. A code/static review is not production evidence. A release is **NOT READY** until `readinessctl check` returns `ready=true` for the exact Git commit and exact migration set deployed.
+This runbook is the release gate for a commercial deployment. A code/static review is not production evidence. A release is **NOT READY** until `readinessctl check` returns `ready=true` for the exact staged release version, Git commit and migration set deployed.
 
 ## Trust boundaries
 
@@ -16,7 +16,7 @@ This runbook is the release gate for a commercial deployment. A code/static revi
 
 ## Required runtime evidence
 
-Set `READINESS_GIT_SHA` to the exact 40-character commit under test. Evidence must be for the current database schema and this exact commit.
+Set `READINESS_GIT_SHA` to the exact 40-character commit under test and `RELEASE_VERSION` to the staged release candidate. The release registry entry must reference the same build SHA, require the current schema and have completed preflight. Evidence must be for the current database schema and this exact commit.
 
 Required evidence types:
 
@@ -34,31 +34,32 @@ Each evidence artifact must have a SHA-256 digest. Record only a reference/path 
 Example shape (replace placeholders with real values):
 
 ```text
-READINESS_GIT_SHA=<exact-commit> ./app readinessctl record BUILD_UNIT PASS <artifact-ref> <sha256> <actor>
+READINESS_GIT_SHA=<exact-commit> RELEASE_VERSION=<staged-version> ./app readinessctl record BUILD_UNIT PASS <artifact-ref> <sha256> <actor>
 ```
 
 Repeat for every required evidence type. A FAIL record is retained immutably and a later successful rerun must create a new PASS record; evidence is never edited or deleted.
 
 ## Release-gate sequence
 
-1. Deploy/test the exact candidate commit in an isolated release environment.
-2. Run migrations. Confirm the applied migration version set exactly equals the repository version set; missing versions in the middle are blockers.
-3. Produce and record `BUILD_UNIT` evidence.
-4. Produce and record `INTEGRATION` evidence.
-5. Verify a fresh installation and record `FRESH_INSTALL` evidence.
-6. Restore a supported previous-schema fixture, upgrade it, validate retained canonical data and record `UPGRADE` evidence.
-7. Run browser smoke for Search, Account, Webmaster, Maps/Reviews, Mail and Admin; record `BROWSER_SMOKE`.
-8. Run the security regression matrix; record `SECURITY_REGRESSION`.
-9. Verify the real HTTPS edge and secure-cookie behavior; record `EDGE_TLS_PROXY`.
-10. Run the Search Quality gate. The latest run must PASS and be no older than 7 days.
-11. Run an `ISOLATED_1M` Capacity benchmark with at least 1,000,000 measured documents, real server CPU/RAM/disk measurements and an ADR. It must be no older than 30 days.
-12. Run BACKUP and RESTORE drills against the current schema. Both latest drills must PASS and be no older than 30 days.
-13. Confirm `resource_pressure` is fresh and not CRITICAL.
-14. If Internet Mail is enabled: verify DNS readiness with no drift, run the real MTA flow, and record `MTA_FLOW`.
-15. Run:
+1. Stage the exact candidate in the release registry and run release preflight.
+2. Deploy/test that exact candidate commit in an isolated release environment.
+3. Run migrations. Confirm the applied migration version set exactly equals the repository version set; missing versions in the middle are blockers.
+4. Produce and record `BUILD_UNIT` evidence.
+5. Produce and record `INTEGRATION` evidence.
+6. Verify a fresh installation and record `FRESH_INSTALL` evidence.
+7. Restore a supported previous-schema fixture, upgrade it, validate retained canonical data and record `UPGRADE` evidence.
+8. Run browser smoke for Search, Account, Webmaster, Maps/Reviews, Mail and Admin; record `BROWSER_SMOKE`.
+9. Run the security regression matrix; record `SECURITY_REGRESSION`.
+10. Verify the real HTTPS edge and secure-cookie behavior; record `EDGE_TLS_PROXY`.
+11. Run the Search Quality gate. The latest run must PASS and be no older than 7 days.
+12. Run an `ISOLATED_1M` Capacity benchmark with at least 1,000,000 measured documents, real server CPU/RAM/disk measurements and an ADR. It must be no older than 30 days.
+13. Run BACKUP and RESTORE drills against the current schema. Both latest drills must PASS and be no older than 30 days.
+14. Confirm `resource_pressure` is fresh and not CRITICAL.
+15. If Internet Mail is enabled: verify DNS readiness for the currently configured `MAIL_DOMAIN + MAIL_DKIM_SELECTOR` with no drift, run the real MTA flow, and record `MTA_FLOW`.
+16. Run:
 
 ```text
-READINESS_GIT_SHA=<exact-commit> ./app readinessctl check
+READINESS_GIT_SHA=<exact-commit> RELEASE_VERSION=<staged-version> ./app readinessctl check
 ```
 
 Only `ready=true` permits a commercial release.
@@ -80,9 +81,10 @@ Only `ready=true` permits a commercial release.
 - Tenant isolation: Webmaster site IDs, Mail item/attachment IDs, Reviews ownership/replies, Billing accounts/usage and Organization Claims cannot cross tenants.
 - SSRF: private/loopback/link-local/metadata addresses, unsafe ports, URL userinfo and redirect-to-private targets are rejected; DNS is revalidated at dial time.
 - Proxy/body limits: every mutating Next proxy has an explicit path allowlist and bounded body; no generic internal backend tunnel exists.
-- Files: storage keys cannot escape blob/map/import roots; user filenames never select server paths.
+- Files: storage keys cannot escape blob/map/import roots; user filenames never select server paths and attachment names reject control characters.
 - Mail machine boundary: HMAC signature, bounded clock skew, replay rejection, bounded bodies, no MTA redirects.
 - Privacy/logging: routine diagnostics do not expose password hashes, session/CSRF/token hashes, raw gateway secrets, DKIM private keys, raw payment event payloads, raw MIME, or full recipient lists.
+- Operator CLI: passwords/raw provider payloads are not passed in argv; secrets use stdin or server-side environment/secret storage as documented.
 
 ## Incident actions
 
@@ -114,7 +116,7 @@ Only `ready=true` permits a commercial release.
 2. Use the immutable release registry to select the previous validated release; do not ad-hoc edit release state.
 3. Use the latest verified current-schema backup and the recovery procedure. A backup without a successful restore drill is not considered sufficient evidence.
 4. After restore, verify migration set, canonical counts, index consistency and Search/Map/Webmaster/Mail smoke before reopening writes.
-5. Record new recovery and readiness evidence; never reuse evidence from a different commit/schema.
+5. Record new recovery and readiness evidence; never reuse evidence from a different commit/schema/release manifest.
 
 ### Capacity incident
 
@@ -124,4 +126,4 @@ Only `ready=true` permits a commercial release.
 
 ## Launch verdict
 
-If any required evidence is missing, stale, FAIL, tied to another commit/schema, or if any known P0/P1 remains unresolved, the verdict is **NOT READY**. Missing runtime evidence must never be converted into a code/static PASS.
+If any required evidence is missing, stale, FAIL, tied to another commit/schema/release manifest, or if any known P0/P1 remains unresolved, the verdict is **NOT READY**. Missing runtime evidence must never be converted into a code/static PASS.
