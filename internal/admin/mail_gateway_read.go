@@ -66,7 +66,7 @@ func (s Service) MailGatewayHealth(ctx context.Context,session Session)(MailGate
  (SELECT count(*) FROM mail_outbound_deliveries WHERE status='DEAD' AND updated_at>=now()-interval '24 hours'),
  (SELECT count(*) FROM mail_gateway_replay_guard WHERE expires_at>now()),
  (SELECT count(*) FROM mail_inbound_receipts WHERE status='PROCESSING'),
- (SELECT count(*) FROM mail_delivery_suppressions WHERE status='ACTIVE' AND suppressed_until>now()),
+ (SELECT count(*) FROM mail_delivery_suppressions WHERE cleared_at IS NULL AND suppressed_until>now()),
  (SELECT count(*) FROM mail_domain_delivery_pressure WHERE cooldown_until>now())
  FROM mail_gateway_events`).Scan(&out.Inbound24h,&out.Delivered24h,&out.Bounced24h,&out.Dead24h,&out.ReplayGuardRows,&out.InboundReceiptsProcessing,&out.ActiveSuppressions,&out.CoolingDomains);err!=nil{return MailGatewayHealth{},err}
 	var dns MailDNSHealth
