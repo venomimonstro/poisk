@@ -5,7 +5,7 @@ const internalBase = (process.env.API_INTERNAL_BASE_URL || "http://localhost:808
 const maxBodyBytes = 16 * 1024;
 
 const getRoutes = new Set([
-  "me","csrf","status","domains","diagnostics","mail/gateway-health","mail/dead-letters",
+  "me","csrf","status","readiness","domains","diagnostics","mail/gateway-health","mail/dead-letters",
   "query-gaps","users","webmaster/sites","billing/invoices","datahub/pages","recovery",
   "quality/latest","answer/metrics","organizations/imports","organizations/reviews",
   "reviews/moderation","maps/state","addresses/data","users/sessions","users/security-events","owner",
