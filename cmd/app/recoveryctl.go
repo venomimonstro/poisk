@@ -23,7 +23,8 @@ func runRecoveryCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
 		if args[5]!="-"{v,err:=strconv.ParseInt(args[5],10,64);if err!=nil||v<0{return errors.New("invalid bytes")};bytesPtr=&v}
 		if args[6]!="-"{v,err:=strconv.ParseInt(args[6],10,64);if err!=nil||v<0{return errors.New("invalid duration-ms")};durationPtr=&v}
 		actor:=strings.TrimSpace(os.Getenv("RECOVERY_ACTOR"));if actor==""{actor="recoveryctl"}
-		drill,err:=repo.Record(ctx,args[1],args[2],artifact,sha,bytesPtr,durationPtr,actor);if err!=nil{return err};return json.NewEncoder(os.Stdout).Encode(drill)
+		commit,err:=capacityBenchmarkCommit();if err!=nil{return errors.New("READINESS_GIT_SHA is required to bind recovery evidence to the exact release")}
+		drill,err:=repo.RecordBound(ctx,args[1],args[2],artifact,sha,bytesPtr,durationPtr,actor,commit);if err!=nil{return err};return json.NewEncoder(os.Stdout).Encode(drill)
 	default:return errors.New("unknown recoveryctl command")
 	}
 }
