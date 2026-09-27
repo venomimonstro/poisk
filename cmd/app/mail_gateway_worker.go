@@ -29,6 +29,7 @@ func runMailGatewayWorker(pool *pgxpool.Pool) error {
 	if !readiness.Ready{return fmt.Errorf("mail DNS is not ready: %s",strings.Join(readiness.Reasons,","))}
 
 	go monitorMailDNSReadiness(ctx,repo,domain,selector,expectedDKIM)
+	go maintainMailDeliverability(ctx,repo)
 	workerID:=fmt.Sprintf("mail-gateway-%d",os.Getpid())
 	worker:=mailcore.GatewayWorker{Repo:repo,MTA:mailcore.MTAClient{BaseURL:baseURL,Secret:[]byte(secret),HTTP:&http.Client{Timeout:20*time.Second}},BlobRoot:blobRoot,WorkerID:workerID,BatchSize:16,Lease:45*time.Second,Poll:time.Second}
 	return worker.Run(ctx)
@@ -46,6 +47,18 @@ func monitorMailDNSReadiness(ctx context.Context,repo mailcore.Repository,domain
 			if err!=nil{slog.Warn("mail DNS readiness check failed","error",err);continue}
 			snapshot,err:=repo.RecordDNSReadiness(ctx,readiness,checkedAt.UTC());if err!=nil{slog.Warn("mail DNS readiness snapshot failed","error",err);continue}
 			if snapshot.Drift||!snapshot.Ready{slog.Warn("mail DNS readiness drift","domain",snapshot.Domain,"ready",snapshot.Ready,"drift",snapshot.Drift,"reasons",snapshot.Reasons)}
+		}
+	}
+}
+
+func maintainMailDeliverability(ctx context.Context,repo mailcore.Repository){
+	ticker:=time.NewTicker(10*time.Minute);defer ticker.Stop()
+	for{
+		select{
+		case <-ctx.Done():return
+		case now:=<-ticker.C:
+			result,err:=repo.MaintainDeliverability(ctx,now.UTC());if err!=nil{slog.Warn("mail deliverability maintenance failed","error",err);continue}
+			if result.StaleSubmitted>0||result.ReplayDeleted>0||result.GatewayEventsDeleted>0||result.OutboundEventsDeleted>0||result.DNSSnapshotsDeleted>0||result.PressureRowsDeleted>0{slog.Info("mail deliverability maintenance","stale_submitted",result.StaleSubmitted,"replay_deleted",result.ReplayDeleted,"gateway_events_deleted",result.GatewayEventsDeleted,"outbound_events_deleted",result.OutboundEventsDeleted,"dns_deleted",result.DNSSnapshotsDeleted,"pressure_deleted",result.PressureRowsDeleted)}
 		}
 	}
 }
