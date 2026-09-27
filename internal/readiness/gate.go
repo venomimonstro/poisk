@@ -129,11 +129,11 @@ ORDER BY r.completed_at DESC,r.run_id DESC LIMIT 1`,g.GitCommit,fmt.Sprint(schem
 }
 
 func (g Gate) recovery(ctx context.Context,kind string,schema int64,now time.Time)(bool,string,error){
-	var status,artifact,sha string;var recordedSchema,bytes,duration int64;var completed time.Time
-	err:=g.DB.QueryRow(ctx,`SELECT status,database_schema,completed_at,COALESCE(artifact_ref,''),COALESCE(artifact_sha256,''),COALESCE(artifact_bytes,0),COALESCE(duration_ms,0) FROM recovery_drills WHERE drill_type=$1 ORDER BY completed_at DESC,drill_id DESC LIMIT 1`,kind).Scan(&status,&recordedSchema,&completed,&artifact,&sha,&bytes,&duration)
-	if errors.Is(err,pgx.ErrNoRows){return false,"no recovery drill",nil};if err!=nil{return false,"",err}
-	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute));verifiable:=artifact!=""&&sha256Pattern.MatchString(sha)&&bytes>0&&duration>0
-	return status=="PASS"&&recordedSchema==schema&&fresh&&verifiable,fmt.Sprintf("status=%s schema=%d expected_schema=%d fresh_30d=%v verifiable=%v artifact=%s bytes=%d duration_ms=%d completed_at=%s",status,recordedSchema,schema,fresh,verifiable,artifact,bytes,duration,completed.UTC().Format(time.RFC3339)),nil
+	var status,artifact,sha,commit string;var recordedSchema,bytes,duration int64;var completed time.Time
+	err:=g.DB.QueryRow(ctx,`SELECT status,database_schema,completed_at,COALESCE(artifact_ref,''),COALESCE(artifact_sha256,''),COALESCE(artifact_bytes,0),COALESCE(duration_ms,0),COALESCE(git_commit,'') FROM recovery_drills WHERE drill_type=$1 AND git_commit=$2 AND database_schema=$3 ORDER BY completed_at DESC,drill_id DESC LIMIT 1`,kind,g.GitCommit,schema).Scan(&status,&recordedSchema,&completed,&artifact,&sha,&bytes,&duration,&commit)
+	if errors.Is(err,pgx.ErrNoRows){return false,"no recovery drill for current commit/schema",nil};if err!=nil{return false,"",err}
+	fresh:=now.Sub(completed.UTC())<=30*24*time.Hour&&completed.Before(now.Add(5*time.Minute));verifiable:=artifact!=""&&sha256Pattern.MatchString(sha)&&bytes>0&&duration>0&&commit==g.GitCommit
+	return status=="PASS"&&recordedSchema==schema&&fresh&&verifiable,fmt.Sprintf("status=%s commit=%s schema=%d expected_schema=%d fresh_30d=%v verifiable=%v artifact=%s bytes=%d duration_ms=%d completed_at=%s",status,commit,recordedSchema,schema,fresh,verifiable,artifact,bytes,duration,completed.UTC().Format(time.RFC3339)),nil
 }
 
 func (g Gate) resourcePressure(ctx context.Context,now time.Time)(bool,string,error){
