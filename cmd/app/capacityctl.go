@@ -56,10 +56,12 @@ func runCapacityBenchmark(ctx context.Context,repo *capacity.Repository,label st
 	concurrency,err:=envInt("CAPACITY_CONCURRENCY",16,1,512);if err!=nil{return err}
 	targetQPS,err:=envFloat("CAPACITY_TARGET_QPS",100,0,1_000_000);if err!=nil{return err}
 	manticoreBytes,err:=envInt64Required("CAPACITY_MANTICORE_BYTES",1);if err!=nil{return fmt.Errorf("CAPACITY_MANTICORE_BYTES must contain a measured Manticore data size: %w",err)}
+	commit,err:=capacityBenchmarkCommit();if err!=nil{return err}
+	databaseSchema,err:=repo.CurrentSchema(ctx);if err!=nil{return fmt.Errorf("read capacity benchmark schema: %w",err)}
 	searchURLs,err:=searchURLsFromFile(base,os.Getenv("CAPACITY_SEARCH_QUERIES"));if err!=nil{return err}
 	geoURLs,err:=endpointURLsFromFile(base,os.Getenv("CAPACITY_GEO_URLS"),"/api/geo/");if err!=nil{return err}
 	addressURLs,err:=endpointURLsFromFile(base,os.Getenv("CAPACITY_ADDRESS_URLS"),"/api/address/");if err!=nil{return err}
-	config:=map[string]any{"base_url":base,"manticore_url":manticoreBase,"duration_seconds":duration.Seconds(),"concurrency":concurrency,"target_qps":targetQPS,"search_cases":len(searchURLs),"geo_cases":len(geoURLs),"address_cases":len(addressURLs)}
+	config:=map[string]any{"git_commit":commit,"database_schema":databaseSchema,"base_url":base,"manticore_url":manticoreBase,"duration_seconds":duration.Seconds(),"concurrency":concurrency,"target_qps":targetQPS,"search_cases":len(searchURLs),"geo_cases":len(geoURLs),"address_cases":len(addressURLs)}
 	runID,err:=repo.StartRun(ctx,label,mode,10_000_000,config);if err!=nil{return err}
 	failed:=true;defer func(){if failed{_ = repo.FailRun(context.Background(),runID,"benchmark command terminated before immutable snapshot")}}()
 
@@ -83,7 +85,14 @@ func runCapacityBenchmark(ctx context.Context,repo *capacity.Repository,label st
 	queueMap:=map[string]any{"before":dbBefore.Queues,"after":dbAfter.Queues,"throughput":dbAfter.Throughput,"corpus":dbAfter.Corpus,"manticore_documents":manticoreDocuments,"indexed_document_delta":dbAfter.Corpus.IndexedDocuments-manticoreDocuments}
 	snapshotID,err:=repo.CompleteRun(ctx,capacity.FinalSnapshot{RunID:runID,MeasuredDocuments:dbAfter.Corpus.IndexedDocuments,MeasuredAt:time.Now().UTC(),Workload:map[string]capacity.WorkloadMetrics{"search":search,"geo":geo,"address":address},Resources:resourceMap,Queues:queueMap,Storage:storage,Projection:projection,Bottlenecks:bottlenecks});if err!=nil{return err}
 	failed=false
-	out:=map[string]any{"run_id":runID,"snapshot_id":snapshotID,"mode":mode,"workload":map[string]capacity.WorkloadMetrics{"search":search,"geo":geo,"address":address},"database":dbAfter,"manticore_documents":manticoreDocuments,"resources":resourceMap,"projection_10m":projection,"bottlenecks":bottlenecks};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");return enc.Encode(out)
+	out:=map[string]any{"run_id":runID,"snapshot_id":snapshotID,"mode":mode,"git_commit":commit,"database_schema":databaseSchema,"workload":map[string]capacity.WorkloadMetrics{"search":search,"geo":geo,"address":address},"database":dbAfter,"manticore_documents":manticoreDocuments,"resources":resourceMap,"projection_10m":projection,"bottlenecks":bottlenecks};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");return enc.Encode(out)
+}
+
+func capacityBenchmarkCommit()(string,error){
+	commit:=strings.ToLower(strings.TrimSpace(os.Getenv("READINESS_GIT_SHA")))
+	if len(commit)!=40{return "",errors.New("READINESS_GIT_SHA is required for capacity benchmark and must be the exact 40-character commit under test")}
+	for _,c:=range commit{if !((c>='0'&&c<='9')||(c>='a'&&c<='f')){return "",errors.New("READINESS_GIT_SHA must be a lowercase hexadecimal commit SHA")}}
+	return commit,nil
 }
 
 func loadCapacityServerMetrics(path string)(capacityServerMetrics,bool,error){
