@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: dev down logs test test-integration lint frontend-check migrate rollback seed search-quality benchmark capacity-status candidate readiness release-gate fresh-install-gate backup restore-test health
+.PHONY: dev down logs test test-integration lint frontend-check migrate rollback seed search-quality benchmark capacity-status candidate readiness release-gate fresh-install-gate upgrade-gate backup restore-test health
 
 dev:
 	docker compose up --build -d
@@ -66,6 +66,11 @@ fresh-install-gate:
 	@test -n "$$READINESS_GIT_SHA" || (echo "READINESS_GIT_SHA is required" >&2; exit 2)
 	@test -n "$$RELEASE_VERSION" || (echo "RELEASE_VERSION is required" >&2; exit 2)
 	bash scripts/fresh_install_gate.sh
+
+upgrade-gate:
+	@test -n "$$READINESS_GIT_SHA" || (echo "READINESS_GIT_SHA is required" >&2; exit 2)
+	@test -n "$$RELEASE_VERSION" || (echo "RELEASE_VERSION is required" >&2; exit 2)
+	bash scripts/upgrade_gate.sh
 
 backup:
 	@echo "A backup is not evidence until a real backup artifact is produced and recorded with exact release/commit/schema metadata."
