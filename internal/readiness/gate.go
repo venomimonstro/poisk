@@ -64,7 +64,7 @@ func (g Gate) Evaluate(ctx context.Context) (Report, error) {
 		pass,detail,err:=g.evidence(ctx,kind,report.ExpectedSchema);if err!=nil{return Report{},err};add("evidence_"+kind,pass,detail)
 	}
 
-	qualityPass,qualityDetail,err:=g.quality(ctx,now);if err!=nil{return Report{},err};add("quality_gate",qualityPass,qualityDetail)
+	qualityPass,qualityDetail,err:=g.quality(ctx,now,report.ExpectedSchema);if err!=nil{return Report{},err};add("quality_gate",qualityPass,qualityDetail)
 	capacityPass,capacityDetail,err:=g.capacity(ctx,now,report.ExpectedSchema);if err!=nil{return Report{},err};add("capacity_1m",capacityPass,capacityDetail)
 	backupPass,backupDetail,err:=g.recovery(ctx,"BACKUP",report.ExpectedSchema,now);if err!=nil{return Report{},err};add("recovery_backup",backupPass,backupDetail)
 	restorePass,restoreDetail,err:=g.recovery(ctx,"RESTORE",report.ExpectedSchema,now);if err!=nil{return Report{},err};add("recovery_restore",restorePass,restoreDetail)
@@ -102,12 +102,12 @@ func (g Gate) evidence(ctx context.Context,kind string,schema int64)(bool,string
 	return status=="PASS",fmt.Sprintf("status=%s commit=%s schema=%d artifact=%s completed_at=%s",status,commit,recordedSchema,artifact,completed.UTC().Format(time.RFC3339)),nil
 }
 
-func (g Gate) quality(ctx context.Context,now time.Time)(bool,string,error){
-	var pass bool;var completed time.Time;var failuresRaw []byte
-	err:=g.DB.QueryRow(ctx,`SELECT gate_pass,completed_at,gate_failures FROM quality_runs ORDER BY completed_at DESC,run_id DESC LIMIT 1`).Scan(&pass,&completed,&failuresRaw)
-	if errors.Is(err,pgx.ErrNoRows){return false,"no quality run",nil};if err!=nil{return false,"",err}
+func (g Gate) quality(ctx context.Context,now time.Time,schema int64)(bool,string,error){
+	var pass bool;var completed time.Time;var failuresRaw []byte;var commit string;var recordedSchema int64
+	err:=g.DB.QueryRow(ctx,`SELECT gate_pass,completed_at,gate_failures,git_commit,database_schema FROM quality_runs WHERE git_commit=$1 AND database_schema=$2 ORDER BY completed_at DESC,run_id DESC LIMIT 1`,g.GitCommit,schema).Scan(&pass,&completed,&failuresRaw,&commit,&recordedSchema)
+	if errors.Is(err,pgx.ErrNoRows){return false,"no quality run for current commit/schema",nil};if err!=nil{return false,"",err}
 	var failures []string;_ = json.Unmarshal(failuresRaw,&failures);fresh:=now.Sub(completed.UTC())<=7*24*time.Hour&&completed.Before(now.Add(5*time.Minute))
-	return pass&&fresh,fmt.Sprintf("pass=%v fresh_7d=%v completed_at=%s failures=%v",pass,fresh,completed.UTC().Format(time.RFC3339),failures),nil
+	return pass&&fresh,fmt.Sprintf("pass=%v commit=%s schema=%d fresh_7d=%v completed_at=%s failures=%v",pass,commit,recordedSchema,fresh,completed.UTC().Format(time.RFC3339),failures),nil
 }
 
 func (g Gate) capacity(ctx context.Context,now time.Time,schema int64)(bool,string,error){
