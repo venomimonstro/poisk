@@ -20,13 +20,14 @@ ON CONFLICT(sender_mailbox_id,address_sha256) DO UPDATE SET reason='HARD_BOUNCE'
 }
 
 func TestMaintainDeliverabilityReconcilesStaleSubmittedWithoutAutoResend(t *testing.T){
-	pool:=mailDB(t);repo:=Repository{DB:pool};ctx:=context.Background();seed:=seedOutboundDelivery(t,repo);base:=time.Now().UTC().Add(-25*time.Hour)
-	items,err:=repo.LeaseOutbound(ctx,"stale-submitted",1,time.Minute,base);if err!=nil||len(items)!=1{t.Fatalf("lease=%+v err=%v",items,err)}
-	if err=repo.MarkOutboundSubmitted(ctx,seed.ID,"stale-submitted","remote-stale",base);err!=nil{t.Fatal(err)}
-	result,err:=repo.MaintainDeliverability(ctx,base.Add(25*time.Hour));if err!=nil{t.Fatal(err)};if result.StaleSubmitted!=1{t.Fatalf("stale submitted=%d",result.StaleSubmitted)}
+	pool:=mailDB(t);repo:=Repository{DB:pool};ctx:=context.Background();seed:=seedOutboundDelivery(t,repo);now:=time.Now().UTC()
+	items,err:=repo.LeaseOutbound(ctx,"stale-submitted",1,time.Minute,now);if err!=nil||len(items)!=1{t.Fatalf("lease=%+v err=%v",items,err)}
+	if err=repo.MarkOutboundSubmitted(ctx,seed.ID,"stale-submitted","remote-stale",now);err!=nil{t.Fatal(err)}
+	if _,err=pool.Exec(ctx,`UPDATE mail_outbound_deliveries SET submitted_at=$2,updated_at=$2 WHERE delivery_id=$1`,seed.ID,now.Add(-25*time.Hour));err!=nil{t.Fatal(err)}
+	result,err:=repo.MaintainDeliverability(ctx,now);if err!=nil{t.Fatal(err)};if result.StaleSubmitted!=1{t.Fatalf("stale submitted=%d",result.StaleSubmitted)}
 	var status,code string;if err=pool.QueryRow(ctx,`SELECT status,COALESCE(last_error_code,'') FROM mail_outbound_deliveries WHERE delivery_id=$1`,seed.ID).Scan(&status,&code);err!=nil{t.Fatal(err)}
 	if status!="DEAD"||code!="SUBMITTED_STALE"{t.Fatalf("status=%s code=%s",status,code)}
-	leased,err:=repo.LeaseOutbound(ctx,"stale-submitted",1,time.Minute,time.Now().UTC());if err!=nil{t.Fatal(err)};if len(leased)!=0{t.Fatalf("stale submitted was automatically resent: %+v",leased)}
+	leased,err:=repo.LeaseOutbound(ctx,"stale-submitted",1,time.Minute,now.Add(time.Minute));if err!=nil{t.Fatal(err)};if len(leased)!=0{t.Fatalf("stale submitted was automatically resent: %+v",leased)}
 }
 
 func TestDNSReadinessSnapshotsDetectOnlyStateChange(t *testing.T){
