@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ProxyBodyTooLarge, readLimitedProxyBody } from "../../_proxyBody";
 
 const internalBase = (process.env.API_INTERNAL_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
 const staticPaths = new Set(["register", "login", "me", "csrf", "sessions", "logout"]);
+const maxBodyBytes = 32 * 1024;
 
 function allowed(path: string[], method: string) {
   if (path.length === 1 && staticPaths.has(path[0])) {
@@ -23,7 +25,7 @@ async function proxy(request: NextRequest, path: string[]) {
     if (cookie) headers.set("Cookie", cookie);
     if (csrf) headers.set("X-CSRF-Token", csrf);
     if (contentType) headers.set("Content-Type", contentType);
-    const body = request.method === "GET" ? undefined : await request.text();
+    const body = request.method === "GET" ? undefined : await readLimitedProxyBody(request, maxBodyBytes);
     const upstream = await fetch(`${internalBase}/api/account/${path.join("/")}`, {
       method: request.method,
       headers,
@@ -44,7 +46,8 @@ async function proxy(request: NextRequest, path: string[]) {
     const setCookie = upstream.headers.get("set-cookie");
     if (setCookie) response.headers.set("Set-Cookie", setCookie);
     return response;
-  } catch {
+  } catch (error) {
+    if (error instanceof ProxyBodyTooLarge) return NextResponse.json({ error: "body_too_large" }, { status: 413 });
     return NextResponse.json({ error: "account_backend_error" }, { status: 502 });
   } finally {
     clearTimeout(timer);
