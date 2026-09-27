@@ -3,6 +3,7 @@ package readiness
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestDiffVersionsDetectsMissingAndUnexpected(t *testing.T){
@@ -24,4 +25,18 @@ func TestEvidenceKindSetIsClosed(t *testing.T){
 		if _,ok:=evidenceKinds[kind];!ok{t.Fatalf("missing kind %s",kind)}
 	}
 	if _,ok:=evidenceKinds["ARBITRARY"];ok{t.Fatal("unexpected arbitrary evidence kind")}
+}
+
+func TestEvidenceMaxAgePolicy(t *testing.T){
+	cases:=map[string]time.Duration{
+		"BUILD_UNIT":0,
+		"INTEGRATION":0,
+		"FRESH_INSTALL":0,
+		"UPGRADE":0,
+		"BROWSER_SMOKE":7*24*time.Hour,
+		"SECURITY_REGRESSION":7*24*time.Hour,
+		"EDGE_TLS_PROXY":24*time.Hour,
+		"MTA_FLOW":24*time.Hour,
+	}
+	for kind,want:=range cases{if got:=evidenceMaxAge(kind);got!=want{t.Fatalf("kind=%s got=%s want=%s",kind,got,want)}}
 }
