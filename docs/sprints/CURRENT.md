@@ -15,6 +15,7 @@
 - Новые product verticals, ranking factors, queue systems и infrastructure platforms запрещены.
 - Security fixes используют существующие auth/RBAC/preview/apply/audit/guard patterns.
 - Commercial READY разрешён только при подтверждённых build/test/migration/recovery/capacity/browser/MTA evidence.
+- Quality, Capacity и Recovery evidence обязаны быть привязаны к exact candidate git commit + exact database schema.
 - Code/static PASS не равен production PASS.
 
 ## Workstreams
@@ -37,12 +38,16 @@
 - [x] Admin VIEWER/ANALYST cannot mutate; destructive OPERATOR/SUPERADMIN actions use preview/apply where required
 - [x] secrets/private keys/raw credentials are absent from user-visible diagnostics and routine diagnostic responses audited in Sprint 28
 - [x] migration versions are duplicate-protected; launch gate validates the exact repository/applied migration set
+- [x] Quality history stores exact release commit/schema binding; old quality PASS cannot certify a newer build
+- [x] Capacity benchmark stores exact release commit/schema binding; HIGH bottlenecks block commercial readiness
+- [x] Recovery PASS requires verifiable artifact metadata and exact release commit/schema binding
+- [x] browser/security/edge/MTA readiness evidence expires according to environment-sensitive TTL
 - [ ] full build + unit tests have verified runtime evidence for the exact release commit/schema
 - [ ] integration/security tests have verified runtime evidence against migrated PostgreSQL
 - [ ] fresh install and previous-schema upgrade are verified for the exact release candidate
 - [ ] browser smoke tests cover Search, Account, Webmaster, Maps/Reviews, Mail and Admin through the real HTTPS edge
-- [ ] real Capacity `ISOLATED_1M` benchmark/snapshot + ADR is available and fresh
-- [ ] current-schema BACKUP and RESTORE drills are PASS and fresh
+- [ ] real Capacity `ISOLATED_1M` benchmark/snapshot + ADR for the exact release is available, fresh and contains no HIGH bottlenecks
+- [ ] exact-release BACKUP and RESTORE drills are PASS, verifiable and fresh
 - [ ] Internet Mail DNS/MTA/suppression/callback flow is verified when Internet Mail is enabled
 - [x] incident/recovery/security runbook is updated
 - [x] commercial-readiness report states exact blockers and does not convert missing evidence into PASS
@@ -53,7 +58,7 @@
 
 **COMMERCIAL READY: NO.**
 
-Code/static gate is PASS, but runtime evidence is intentionally not inferred. The exact release commit must record BUILD_UNIT, INTEGRATION, FRESH_INSTALL, UPGRADE, BROWSER_SMOKE, SECURITY_REGRESSION and EDGE_TLS_PROXY evidence for the current schema. Internet Mail additionally requires MTA_FLOW plus fresh DNS readiness for the configured domain/selector. Quality, Capacity, BACKUP/RESTORE and resource-pressure checks must also pass. Only `readinessctl check` returning `ready=true` changes this verdict.
+Code/static gate is PASS, but runtime evidence is intentionally not inferred. The exact release commit must record BUILD_UNIT, INTEGRATION, FRESH_INSTALL, UPGRADE, BROWSER_SMOKE, SECURITY_REGRESSION and EDGE_TLS_PROXY evidence for the current schema. Internet Mail additionally requires MTA_FLOW plus fresh DNS readiness for the configured domain/selector. Quality, Capacity and BACKUP/RESTORE must belong to the same exact release commit/schema; Capacity must have no HIGH bottlenecks; recovery artifacts must have verifiable SHA-256/size/duration metadata. Only `readinessctl check` returning `ready=true` changes this verdict.
 
 ## Forbidden Work
 - new product verticals while this gate is open
