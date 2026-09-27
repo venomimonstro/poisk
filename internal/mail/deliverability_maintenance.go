@@ -40,7 +40,9 @@ RETURNING delivery_id,attempts`,now,now.Add(-staleSubmittedAfter));if err!=nil{r
 	}
 	if out.ReplayDeleted,err=deleteBounded(ctx,tx,`mail_gateway_replay_guard`,`event_id`,`expires_at<=$1`,now,2000);err!=nil{return out,err}
 	if out.GatewayEventsDeleted,err=deleteBounded(ctx,tx,`mail_gateway_events`,`gateway_event_id`,`created_at<$1`,now.Add(-gatewayEventRetention),5000);err!=nil{return out,err}
-	if out.OutboundEventsDeleted,err=deleteBounded(ctx,tx,`mail_outbound_events`,`event_id`,`created_at<$1`,now.Add(-outboundEventRetention),5000);err!=nil{return out,err}
+	// DEAD_RETRY is retained because it is the durable authorization/rate-limit audit
+	// for manual retries. There can be at most MaxManualDeadRetries per delivery.
+	if out.OutboundEventsDeleted,err=deleteBounded(ctx,tx,`mail_outbound_events`,`event_id`,`created_at<$1 AND action<>'DEAD_RETRY'`,now.Add(-outboundEventRetention),5000);err!=nil{return out,err}
 	if out.DNSSnapshotsDeleted,err=deleteBounded(ctx,tx,`mail_dns_readiness_snapshots`,`snapshot_id`,`checked_at<$1`,now.Add(-dnsSnapshotRetention),2000);err!=nil{return out,err}
 	if out.PressureRowsDeleted,err=deleteBounded(ctx,tx,`mail_domain_delivery_pressure`,`domain`,`updated_at<$1 AND (cooldown_until IS NULL OR cooldown_until<=$2)`,[]any{now.Add(-pressureRetention),now},2000);err!=nil{return out,err}
 	if err=tx.Commit(ctx);err!=nil{return out,err};return out,nil
