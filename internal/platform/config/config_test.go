@@ -33,3 +33,46 @@ func TestLoadRejectsInvalidManticorePort(t *testing.T) {
 		t.Fatal("expected invalid Manticore port error")
 	}
 }
+
+func TestLoadInternetMailUsesCanonicalVariables(t *testing.T) {
+	t.Setenv("POSTGRES_PASSWORD", "secret")
+	t.Setenv("MAIL_INTERNET_ENABLED", "true")
+	t.Setenv("MAIL_DOMAIN", "mail.example.test")
+	t.Setenv("MAIL_MTA_BASE_URL", "https://mta-bridge.internal:8443")
+	t.Setenv("MAIL_GATEWAY_SHARED_SECRET", "0123456789abcdef0123456789abcdef")
+	cfg, err := Load()
+	if err != nil { t.Fatalf("Load() error = %v", err) }
+	if !cfg.MailInternetEnabled || cfg.MailDomain != "mail.example.test" || cfg.MailMTABaseURL != "https://mta-bridge.internal:8443" {
+		t.Fatalf("unexpected mail config: %+v", cfg)
+	}
+}
+
+func TestLoadInternetMailRejectsHTTPMTA(t *testing.T) {
+	t.Setenv("POSTGRES_PASSWORD", "secret")
+	t.Setenv("MAIL_INTERNET_ENABLED", "true")
+	t.Setenv("MAIL_DOMAIN", "mail.example.test")
+	t.Setenv("MAIL_MTA_BASE_URL", "http://mta-bridge.internal:8080")
+	t.Setenv("MAIL_GATEWAY_SHARED_SECRET", "0123456789abcdef0123456789abcdef")
+	if _, err := Load(); err == nil { t.Fatal("expected insecure MTA URL rejection") }
+}
+
+func TestLoadInternetMailRejectsShortSecret(t *testing.T) {
+	t.Setenv("POSTGRES_PASSWORD", "secret")
+	t.Setenv("MAIL_INTERNET_ENABLED", "true")
+	t.Setenv("MAIL_DOMAIN", "mail.example.test")
+	t.Setenv("MAIL_MTA_BASE_URL", "https://mta-bridge.internal:8443")
+	t.Setenv("MAIL_GATEWAY_SHARED_SECRET", "too-short")
+	if _, err := Load(); err == nil { t.Fatal("expected short gateway secret rejection") }
+}
+
+func TestLoadInternetMailDoesNotAcceptLegacyVariableNames(t *testing.T) {
+	t.Setenv("POSTGRES_PASSWORD", "secret")
+	t.Setenv("MAIL_INTERNET_ENABLED", "true")
+	t.Setenv("MAIL_PUBLIC_DOMAIN", "legacy.example.test")
+	t.Setenv("MAIL_RELAY_ADDR", "legacy.example.test:25")
+	t.Setenv("MAIL_GATEWAY_SECRET_FILE", "/run/secrets/legacy")
+	t.Setenv("MAIL_DOMAIN", "")
+	t.Setenv("MAIL_MTA_BASE_URL", "")
+	t.Setenv("MAIL_GATEWAY_SHARED_SECRET", "")
+	if _, err := Load(); err == nil { t.Fatal("expected canonical Internet Mail variables to be required") }
+}
