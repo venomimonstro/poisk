@@ -60,5 +60,5 @@ func (r *Repository) RevokeSession(ctx context.Context,sessionID,adminID int64)e
 func (r *Repository) RevokeAllSessions(ctx context.Context,adminID int64)error{_,err:=r.db.Exec(ctx,`UPDATE admin_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE admin_id=$1`,adminID);return err}
 func (r *Repository) SecurityEvent(ctx context.Context,adminID *int64,eventType string,success bool,details string)error{eventType=strings.TrimSpace(eventType);if eventType==""||len(eventType)>96{return ErrInvalidCredential};if details==""{details="{}"};_,err:=r.db.Exec(ctx,`INSERT INTO admin_security_events(admin_id,event_type,success,details) VALUES($1,$2,$3,$4::jsonb)`,adminID,eventType,success,details);return err}
 
-func ValidRole(role string)bool{switch role{case "SUPERADMIN","OPERATOR","ANALYST","SUPPORT":return true};return false}
+func ValidRole(role string)bool{switch role{case "SUPERADMIN","OPERATOR","ANALYST","VIEWER","SUPPORT":return true};return false}
 func nullableHash(value []byte)any{if len(value)==0{return nil};return value}
