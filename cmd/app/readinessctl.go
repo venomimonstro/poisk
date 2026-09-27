@@ -20,15 +20,15 @@ func runReadinessCtl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,ar
 	versions,err:=migrate.ExpectedVersions(cfg.MigrationsDir);if err!=nil{return err}
 	commit:=strings.ToLower(strings.TrimSpace(os.Getenv("READINESS_GIT_SHA")));if commit==""{return errors.New("READINESS_GIT_SHA is required and must be the exact 40-character commit under test")}
 	releaseVersion:=strings.TrimSpace(os.Getenv("RELEASE_VERSION"))
+	if releaseVersion==""||releaseVersion=="dev"{return errors.New("RELEASE_VERSION is required and must identify the staged release candidate")}
 	switch args[0]{
 	case "check":
-		if releaseVersion==""||releaseVersion=="dev"{return errors.New("RELEASE_VERSION is required and must identify the staged release candidate")}
 		gate:=readiness.Gate{DB:pool,ExpectedVersions:versions,GitCommit:commit,ReleaseVersion:releaseVersion,InternetMail:cfg.MailInternetEnabled,MailDomain:cfg.MailDomain,MailSelector:strings.TrimSpace(os.Getenv("MAIL_DKIM_SELECTOR"))}
 		report,err:=gate.Evaluate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Ready{return errors.New("commercial readiness gate failed")};return nil
 	case "record":
 		if len(args)<6{return errors.New("usage: readinessctl record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json]")}
 		details:=map[string]any{};if len(args)>6{if err:=json.Unmarshal([]byte(args[6]),&details);err!=nil{return fmt.Errorf("invalid details_json: %w",err)}}
-		id,err:=readiness.RecordEvidence(ctx,pool,readiness.EvidenceInput{Type:args[1],Status:args[2],GitCommit:commit,DatabaseSchema:versions[len(versions)-1],ArtifactRef:args[3],ArtifactSHA256:args[4],Actor:args[5],Details:details,CompletedAt:time.Now().UTC()});if err!=nil{return err};fmt.Fprintf(os.Stdout,"evidence_id=%d\n",id);return nil
+		id,err:=readiness.RecordEvidence(ctx,pool,readiness.EvidenceInput{Type:args[1],Status:args[2],GitCommit:commit,ReleaseVersion:releaseVersion,DatabaseSchema:versions[len(versions)-1],ArtifactRef:args[3],ArtifactSHA256:args[4],Actor:args[5],Details:details,CompletedAt:time.Now().UTC()});if err!=nil{return err};fmt.Fprintf(os.Stdout,"evidence_id=%d\n",id);return nil
 	default:return fmt.Errorf("readinessctl command %q is not implemented",args[0])
 	}
 }
