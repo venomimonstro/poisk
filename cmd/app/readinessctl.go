@@ -22,15 +22,17 @@ import (
 const maxReadinessArtifactBytes int64 = 256 << 20
 
 func runReadinessCtl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,args []string)error{
-	if len(args)==0{return errors.New("usage: readinessctl check | record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json] | record-file <type> <PASS|FAIL> <artifact_path> <actor> [details_json]")}
+	if len(args)==0{return errors.New("usage: readinessctl candidate|check | record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json] | record-file <type> <PASS|FAIL> <artifact_path> <actor> [details_json]")}
 	versions,err:=migrate.ExpectedVersions(cfg.MigrationsDir);if err!=nil{return err}
 	commit:=strings.ToLower(strings.TrimSpace(os.Getenv("READINESS_GIT_SHA")));if commit==""{return errors.New("READINESS_GIT_SHA is required and must be the exact 40-character commit under test")}
 	releaseVersion:=strings.TrimSpace(os.Getenv("RELEASE_VERSION"))
 	if releaseVersion==""||releaseVersion=="dev"{return errors.New("RELEASE_VERSION is required and must identify the staged release candidate")}
 	latestSchema:=versions[len(versions)-1]
+	gate:=readiness.Gate{DB:pool,ExpectedVersions:versions,GitCommit:commit,ReleaseVersion:releaseVersion,InternetMail:cfg.MailInternetEnabled,MailDomain:cfg.MailDomain,MailSelector:strings.TrimSpace(os.Getenv("MAIL_DKIM_SELECTOR"))}
 	switch args[0]{
+	case "candidate":
+		report,err:=gate.Candidate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Valid{return errors.New("release candidate precheck failed")};return nil
 	case "check":
-		gate:=readiness.Gate{DB:pool,ExpectedVersions:versions,GitCommit:commit,ReleaseVersion:releaseVersion,InternetMail:cfg.MailInternetEnabled,MailDomain:cfg.MailDomain,MailSelector:strings.TrimSpace(os.Getenv("MAIL_DKIM_SELECTOR"))}
 		report,err:=gate.Evaluate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Ready{return errors.New("commercial readiness gate failed")};return nil
 	case "record":
 		if len(args)<6{return errors.New("usage: readinessctl record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json]")}
@@ -56,5 +58,6 @@ func hashReadinessArtifact(path string)(string,string,error){
 	if info.Size()>maxReadinessArtifactBytes{return "","",fmt.Errorf("readiness artifact exceeds %d bytes",maxReadinessArtifactBytes)}
 	if len(clean)>240{return "","",errors.New("readiness artifact path is too long")}
 	f,err:=os.Open(clean);if err!=nil{return "","",err};defer f.Close()
-	h:=sha256.New();n,err:=io.Copy(h,io.LimitReader(f,maxReadinessArtifactBytes+1));if err!=nil{return "","",err};if n!=info.Size(){return "","",errors.New("readiness artifact changed while hashing")};return clean,hex.EncodeToString(h.Sum(nil)),nil
+	opened,err:=f.Stat();if err!=nil{return "","",err};if !os.SameFile(info,opened){return "","",errors.New("readiness artifact changed before hashing")}
+	h:=sha256.New();n,err:=io.Copy(h,io.LimitReader(f,maxReadinessArtifactBytes+1));if err!=nil{return "","",err};if n!=opened.Size(){return "","",errors.New("readiness artifact changed while hashing")};return clean,hex.EncodeToString(h.Sum(nil)),nil
 }
