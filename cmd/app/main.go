@@ -105,6 +105,8 @@ func run() error {
 		return runReleaseCtl(ctx, pool, os.Args[2:])
 	case "recoveryctl":
 		return runRecoveryCtl(ctx, pool, os.Args[2:])
+	case "readinessctl":
+		return runReadinessCtl(ctx, cfg, pool, os.Args[2:])
 	case "billingctl":
 		return runBillingCtl(ctx, pool, os.Args[2:])
 	case "quality":
@@ -194,7 +196,7 @@ func perfHandler(recorder *platformmetrics.LatencyRecorder) http.HandlerFunc {
 func runIndexer(cfg config.Config, pool *pgxpool.Pool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	index, err := indexmanticore.New(indexmanticore.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreHTTPPort)})
+	index, err := indexmanticore.New(indexmanticore.Config{BaseURL: fmt.Sprintf("http://%s:%d", cfg.ManticoreHost, cfg.ManticoreSQLPort)})
 	if err != nil { return fmt.Errorf("create search index client: %w", err) }
 	if err := index.EnsureSchema(ctx); err != nil { return fmt.Errorf("ensure web index schema: %w", err) }
 	outboxRepo := outbox.NewRepositoryForEntityTypes(pool, indexworker.WebDocumentEntity)
