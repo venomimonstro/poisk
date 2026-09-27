@@ -43,7 +43,9 @@ func randomUUID() (string,error){
 }
 
 func safeFilename(raw string)(string,error){
-	raw=strings.TrimSpace(raw);if raw==""||len([]rune(raw))>255||raw=="."||raw==".."||strings.ContainsAny(raw,"/\\")||strings.ContainsRune(raw,'\x00'){return "",ErrInvalid};return raw,nil
+	raw=strings.TrimSpace(raw);if raw==""||len([]rune(raw))>255||raw=="."||raw==".."||strings.ContainsAny(raw,"/\\"){return "",ErrInvalid}
+	for _,r:=range raw{if r<0x20||r==0x7f{return "",ErrInvalid}}
+	return raw,nil
 }
 
 func normalizeContentType(raw string) string {raw=strings.TrimSpace(raw);if raw==""||len(raw)>255||strings.ContainsAny(raw,"\r\n\x00"){return "application/octet-stream"};return raw}
@@ -55,8 +57,7 @@ func (s AttachmentStore) Prepare() error {
 
 func (s AttachmentStore) Upload(ctx context.Context,userID,messageID int64,filename,contentType string,src io.Reader,now time.Time)(Attachment,error){
 	if userID<=0||messageID<=0||src==nil{return Attachment{},ErrInvalid};var err error;if filename,err=safeFilename(filename);err!=nil{return Attachment{},err};contentType=normalizeContentType(contentType);if now.IsZero(){now=time.Now().UTC()};if err=s.Prepare();err!=nil{return Attachment{},err}
-	box,err:=s.Repo.EnsureMailbox(ctx,userID);if err!=nil{return Attachment{},err}
-	storageKey,err:=randomUUID();if err!=nil{return Attachment{},err};blobID,err:=randomUUID();if err!=nil{return Attachment{},err}
+	box,err:=s.Repo.EnsureMailbox(ctx,userID);if err!=nil{return Attachment{},err};storageKey,err:=randomUUID();if err!=nil{return Attachment{},err};blobID,err:=randomUUID();if err!=nil{return Attachment{},err}
 	tmp,err:=os.CreateTemp(s.Root,"upload-*.tmp");if err!=nil{return Attachment{},err};tmpPath:=tmp.Name();committed:=false;defer func(){_ = tmp.Close();if !committed{_ = os.Remove(tmpPath)}}();if err=os.Chmod(tmpPath,0600);err!=nil{return Attachment{},err}
 	h:=sha256.New();n,err:=io.Copy(io.MultiWriter(tmp,h),io.LimitReader(src,maxAttachmentBytes+1));if err!=nil{return Attachment{},err};if n<=0||n>maxAttachmentBytes{return Attachment{},ErrInvalid};if err=tmp.Sync();err!=nil{return Attachment{},err};if err=tmp.Close();err!=nil{return Attachment{},err}
 	finalPath:=filepath.Join(s.Root,storageKey+".blob");if err=os.Rename(tmpPath,finalPath);err!=nil{return Attachment{},err};tmpPath=finalPath
