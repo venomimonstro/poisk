@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ type Drill struct {
 }
 
 var ErrInvalid = errors.New("invalid recovery drill evidence")
+var sha256Pattern=regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func validType(v string) bool { return v=="BACKUP"||v=="RESTORE" }
 func validStatus(v string) bool { return v=="PASS"||v=="FAIL" }
@@ -33,9 +35,12 @@ func (r Repository) Record(ctx context.Context, drillType,status,artifactRef,sha
 	if r.DB==nil{return Drill{},ErrInvalid}
 	drillType=strings.ToUpper(strings.TrimSpace(drillType));status=strings.ToUpper(strings.TrimSpace(status));artifactRef=strings.TrimSpace(artifactRef);sha256=strings.ToLower(strings.TrimSpace(sha256));actor=strings.TrimSpace(actor)
 	if !validType(drillType)||!validStatus(status)||actor==""||len(actor)>120||len(artifactRef)>240{return Drill{},ErrInvalid}
-	if sha256!=""&&len(sha256)!=64{return Drill{},ErrInvalid}
+	if sha256!=""&&!sha256Pattern.MatchString(sha256){return Drill{},ErrInvalid}
 	if artifactBytes!=nil&&*artifactBytes<0{return Drill{},ErrInvalid};if durationMS!=nil&&*durationMS<0{return Drill{},ErrInvalid}
-	var schema int64;if err:=r.DB.QueryRow(ctx,`SELECT COALESCE(max(version),0) FROM schema_migrations`).Scan(&schema);err!=nil{return Drill{},err}
+	if status=="PASS"{
+		if artifactRef==""||!sha256Pattern.MatchString(sha256)||artifactBytes==nil||*artifactBytes<=0||durationMS==nil||*durationMS<=0{return Drill{},ErrInvalid}
+	}
+	var schema int64;if err:=r.DB.QueryRow(ctx,`SELECT COALESCE(max(version),0) FROM schema_migrations`).Scan(&schema);err!=nil{return Drill{},err};if schema<=0{return Drill{},ErrInvalid}
 	var out Drill
 	err:=r.DB.QueryRow(ctx,`INSERT INTO recovery_drills(drill_type,status,artifact_ref,artifact_sha256,artifact_bytes,duration_ms,database_schema,actor)
 VALUES($1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8)
