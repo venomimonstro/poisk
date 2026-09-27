@@ -43,8 +43,11 @@ func (r Repository) LeaseOutbound(ctx context.Context,worker string,limit int,le
 	tx,err:=r.DB.Begin(ctx);if err!=nil{return nil,err};defer func(){_=tx.Rollback(ctx)}()
 	rows,err:=tx.Query(ctx,`WITH picked AS (
  SELECT d.delivery_id FROM mail_outbound_deliveries d
+ JOIN mail_external_recipients r ON r.external_recipient_id=d.external_recipient_id
+ LEFT JOIN mail_domain_delivery_pressure p ON p.domain=lower(split_part(r.address,'@',2))
  WHERE d.status IN ('READY','RETRY') AND d.next_attempt_at<=$1
- ORDER BY d.next_attempt_at,d.delivery_id FOR UPDATE SKIP LOCKED LIMIT $2
+   AND (p.cooldown_until IS NULL OR p.cooldown_until<=$1)
+ ORDER BY d.next_attempt_at,d.delivery_id FOR UPDATE OF d SKIP LOCKED LIMIT $2
 )
 UPDATE mail_outbound_deliveries d SET status='LEASED',lease_owner=$3,lease_until=$1+make_interval(secs => $4),attempts=d.attempts+1,updated_at=$1
 FROM picked p WHERE d.delivery_id=p.delivery_id
