@@ -17,6 +17,11 @@ func TestGateRejectsInvalidCommitBeforeDatabaseAccess(t *testing.T){
 }
 
 func TestEvidenceKindSetIsClosed(t *testing.T){
-	for _,kind:=range []string{"BUILD_UNIT","INTEGRATION","FRESH_INSTALL","UPGRADE","BROWSER_SMOKE","MTA_FLOW"}{if _,ok:=evidenceKinds[kind];!ok{t.Fatalf("missing kind %s",kind)}}
+	for _,kind:=range []string{
+		"BUILD_UNIT","INTEGRATION","FRESH_INSTALL","UPGRADE","BROWSER_SMOKE",
+		"SECURITY_REGRESSION","EDGE_TLS_PROXY","MTA_FLOW",
+	}{
+		if _,ok:=evidenceKinds[kind];!ok{t.Fatalf("missing kind %s",kind)}
+	}
 	if _,ok:=evidenceKinds["ARBITRARY"];ok{t.Fatal("unexpected arbitrary evidence kind")}
 }
