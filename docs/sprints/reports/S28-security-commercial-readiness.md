@@ -10,11 +10,12 @@ Final code/static audit covered public/Next/backend proxy boundaries, consumer/A
 
 - Bounded request bodies were enforced on Account/Admin/Webmaster/Reviews Next proxies; route allowlists remain explicit and there is no generic internal backend tunnel.
 - Outbound MTA submission no longer follows HTTP redirects. A signed mail envelope and gateway HMAC headers cannot be forwarded to a redirect target.
-- Production-like browser transport is fail-closed: every environment other than dev/development/local/test requires `PUBLIC_BASE_URL=https://...`; browser auth cookies use one shared Secure-cookie policy.
+- Browser transport is fail-closed: every environment other than dev/development/local/test requires `PUBLIC_BASE_URL=https://...`; browser auth cookies use one shared Secure-cookie policy.
 - Admin creation no longer accepts the password in argv. The password is read as one bounded stdin line to avoid process-list/shell-history disclosure.
 - Mail attachment filenames reject path separators, NUL and all control characters. Blob storage continues to use server-generated UUID storage keys, tenant-scoped lookup and safe attachment response headers.
-- Mail DNS launch evidence is now bound to the currently configured `MAIL_DOMAIN + MAIL_DKIM_SELECTOR`; a readiness snapshot for a previous domain/selector cannot satisfy the gate.
+- Mail DNS launch evidence is bound to the currently configured `MAIL_DOMAIN + MAIL_DKIM_SELECTOR`; a readiness snapshot for a previous domain/selector cannot satisfy the gate.
 - Exact migration-set validation was added to readiness. Missing migrations in the middle of the chain are blockers even if the maximum schema version looks current.
+- Commercial evidence is also bound to `RELEASE_VERSION`: the release registry manifest must use the same build SHA, require the current schema and have completed preflight.
 - A transient indexer wiring regression introduced while adding readiness wiring was detected in the same audit and fixed immediately; Manticore indexing uses its HTTP endpoint again.
 
 No known unresolved P0/P1 security or data-integrity defect remains in the code/static audit at the time of this report. This statement is not a substitute for runtime security/integration evidence.
@@ -27,6 +28,7 @@ No known unresolved P0/P1 security or data-integrity defect remains in the code/
 - Mail machine boundary: bounded request bodies, HMAC timestamp/signature validation, replay claim, private internal gateway path, no public backend host port in standard Compose.
 - Attachments: bounded upload, quota/rate limit, tenant-scoped access, UUID storage key, no user-selected server path, safe download headers.
 - Admin support diagnostics omit password hashes, raw session/CSRF/token hashes and raw payment payloads.
+- Operator CLI does not accept the Admin password or raw provider payment payload in argv.
 - `.github/workflows` is absent; no GitHub Actions/CI was added.
 
 ## Commercial readiness infrastructure added
@@ -46,6 +48,7 @@ Required evidence types:
 
 `readinessctl check` additionally requires:
 
+- `RELEASE_VERSION` resolves to a staged/active/previous release registry manifest whose `build_sha` equals `READINESS_GIT_SHA`, whose required schema equals the repository schema and whose preflight completed;
 - exact repository/applied migration-set match;
 - recent PASS Search Quality gate;
 - real `ISOLATED_1M` Capacity snapshot with >=1,000,000 measured documents and an ADR;
@@ -72,6 +75,7 @@ Existing integration suites cover tenant isolation and security behavior across 
 
 - trust boundaries;
 - required runtime evidence;
+- release-manifest binding;
 - browser smoke matrix;
 - security regression matrix;
 - exact release-gate sequence;
@@ -84,20 +88,21 @@ Not claimed in this report. The current execution environment used for developme
 
 Still required before commercial launch:
 
-1. backend build + complete Go unit test run and frontend build/type check for the exact candidate commit;
-2. complete integration/security suite on migrated PostgreSQL;
-3. empty-database fresh install to the exact current migration set;
-4. supported previous-schema upgrade with retained canonical data;
-5. browser smoke through the real HTTPS edge for Search, Account, Webmaster, Maps/Reviews, Mail and Admin;
-6. SECURITY_REGRESSION evidence;
-7. EDGE_TLS_PROXY evidence;
-8. fresh Search Quality PASS;
-9. real 1M Capacity run + ADR;
-10. current-schema BACKUP PASS and RESTORE PASS drill;
-11. if Internet Mail is enabled: real MTA flow plus fresh configured-domain/selector DNS readiness with no drift.
+1. stage/preflight the exact candidate release manifest and bind `RELEASE_VERSION` + `READINESS_GIT_SHA`;
+2. backend build + complete Go unit test run and frontend build/type check for the exact candidate commit;
+3. complete integration/security suite on migrated PostgreSQL;
+4. empty-database fresh install to the exact current migration set;
+5. supported previous-schema upgrade with retained canonical data;
+6. browser smoke through the real HTTPS edge for Search, Account, Webmaster, Maps/Reviews, Mail and Admin;
+7. SECURITY_REGRESSION evidence;
+8. EDGE_TLS_PROXY evidence;
+9. fresh Search Quality PASS;
+10. real 1M Capacity run + ADR;
+11. current-schema BACKUP PASS and RESTORE PASS drill;
+12. if Internet Mail is enabled: real MTA flow plus fresh configured-domain/selector DNS readiness with no drift.
 
 ## Launch verdict
 
 **NOT READY for commercial production yet.**
 
-The remaining blocker is no longer missing product architecture: it is the absence of the required real runtime evidence for the exact release commit/schema. Commercial READY may be declared only after those artifacts are recorded and `readinessctl check` returns `ready=true`.
+The remaining blocker is no longer missing product architecture: it is the absence of the required real runtime evidence for the exact release manifest/commit/schema. Commercial READY may be declared only after those artifacts are recorded and `readinessctl check` returns `ready=true`.
