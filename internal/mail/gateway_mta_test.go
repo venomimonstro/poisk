@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -36,12 +37,25 @@ func TestMTAClientSubmitUsesSignedFixedEndpoint(t *testing.T){
 	if seenPath!="/ignored/path/v1/outbound"{t.Fatalf("path=%q",seenPath)}
 }
 
+func TestMTAClientRejectsRedirectWithoutForwardingSignedEnvelope(t *testing.T){
+	secret:=bytes.Repeat([]byte("r"),32)
+	var targetHits atomic.Int32
+	target:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){targetHits.Add(1);w.WriteHeader(http.StatusOK)}));defer target.Close()
+	source:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){http.Redirect(w,r,target.URL+"/capture",http.StatusTemporaryRedirect)}));defer source.Close()
+	_,err:=(MTAClient{BaseURL:source.URL,Secret:secret,HTTP:source.Client()}).Submit(context.Background(),MTAEnvelope{DeliveryID:8,IdempotencyKey:"delivery-8",From:"a@example.test",Recipient:"b@remote.test",RecipientType:"TO"})
+	var mtaErr *MTAError;if !errors.As(err,&mtaErr){t.Fatalf("err=%v",err)}
+	if mtaErr.Code!="MTA_HTTP_307"{t.Fatalf("code=%q",mtaErr.Code)}
+	if targetHits.Load()!=0{t.Fatalf("redirect target received signed request: hits=%d",targetHits.Load())}
+}
+
 func TestMTAClientRejectsWeakSecretAndInvalidBaseURL(t *testing.T){
 	envelope:=MTAEnvelope{DeliveryID:1,IdempotencyKey:"delivery-1",From:"a@example.test",Recipient:"b@remote.test",RecipientType:"TO"}
 	_,err:= (MTAClient{BaseURL:"https://mta.example.test",Secret:[]byte("short")}).Submit(context.Background(),envelope)
 	var mtaErr *MTAError;if !errors.As(err,&mtaErr)||!mtaErr.Permanent||mtaErr.Code!="MTA_CONFIG"{t.Fatalf("weak secret err=%v",err)}
 	_,err=(MTAClient{BaseURL:"file:///tmp/relay",Secret:bytes.Repeat([]byte("x"),32)}).Submit(context.Background(),envelope)
 	if !errors.As(err,&mtaErr)||!mtaErr.Permanent||mtaErr.Code!="MTA_CONFIG"{t.Fatalf("invalid base err=%v",err)}
+	_,err=(MTAClient{BaseURL:"https://user:pass@mta.example.test",Secret:bytes.Repeat([]byte("x"),32)}).Submit(context.Background(),envelope)
+	if !errors.As(err,&mtaErr)||!mtaErr.Permanent||mtaErr.Code!="MTA_CONFIG"{t.Fatalf("userinfo base err=%v",err)}
 }
 
 func TestMTAClientClassifiesRemoteFailures(t *testing.T){
