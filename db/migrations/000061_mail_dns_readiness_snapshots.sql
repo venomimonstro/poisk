@@ -27,5 +27,5 @@ END;
 $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_mail_dns_readiness_snapshots_no_update ON mail_dns_readiness_snapshots;
 CREATE TRIGGER trg_mail_dns_readiness_snapshots_no_update
-BEFORE UPDATE OR DELETE ON mail_dns_readiness_snapshots
+BEFORE UPDATE ON mail_dns_readiness_snapshots
 FOR EACH ROW EXECUTE FUNCTION mail_dns_readiness_snapshots_immutable();
