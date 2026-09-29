@@ -27,6 +27,7 @@ fi
 ARTIFACT_ROOT="${READINESS_ARTIFACT_DIR:-${TMPDIR:-/tmp}/poisk-readiness/${RELEASE_VERSION}-${READINESS_GIT_SHA}}"
 mkdir -p "$ARTIFACT_ROOT"
 APP_BIN="$ARTIFACT_ROOT/poisk-app"
+BUILD_LDFLAGS="-X github.com/venomimonstro/poisk/internal/buildinfo.GitCommit=$READINESS_GIT_SHA -X github.com/venomimonstro/poisk/internal/buildinfo.ReleaseVersion=$RELEASE_VERSION"
 
 sha256_file() {
   local path="$1"
@@ -72,7 +73,7 @@ BUILD_LOG="$ARTIFACT_ROOT/build-unit.log"
 
 run_logged "$BUILD_LOG" go vet ./...
 run_logged "$BUILD_LOG" go test ./...
-run_logged "$BUILD_LOG" go build -trimpath -o "$APP_BIN" ./cmd/app
+run_logged "$BUILD_LOG" go build -trimpath -ldflags "$BUILD_LDFLAGS" -o "$APP_BIN" ./cmd/app
 (
   cd web
   run_logged "$BUILD_LOG" npm ci
