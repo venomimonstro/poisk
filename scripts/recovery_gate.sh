@@ -38,9 +38,11 @@ mkdir -p "$ARTIFACT_ROOT"
 APP_BIN="$ARTIFACT_ROOT/poisk-app"
 LOG="$ARTIFACT_ROOT/recovery.log"
 PORT="${READINESS_RESTORE_APP_PORT:-18082}"
+BUILD_LDFLAGS="-X github.com/venomimonstro/poisk/internal/buildinfo.GitCommit=$READINESS_GIT_SHA -X github.com/venomimonstro/poisk/internal/buildinfo.ReleaseVersion=$RELEASE_VERSION"
 [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1024 && PORT <= 65535 )) || { echo "invalid READINESS_RESTORE_APP_PORT" >&2; exit 2; }
 : > "$LOG"
-if [[ ! -x "$APP_BIN" ]]; then go build -trimpath -o "$APP_BIN" ./cmd/app >>"$LOG" 2>&1; fi
+rm -f "$APP_BIN"
+go build -trimpath -ldflags "$BUILD_LDFLAGS" -o "$APP_BIN" ./cmd/app >>"$LOG" 2>&1
 
 "$APP_BIN" readinessctl candidate >>"$LOG" 2>&1
 "$ROOT_DIR/deploy/backup/verify.sh" "$READINESS_BACKUP_DIR" >>"$LOG" 2>&1
@@ -67,6 +69,16 @@ cmp -s "$expected_versions" "$applied_versions" || { echo "restored migration se
 manifest_schema="$(sed -n 's/^database_schema=//p' "$READINESS_BACKUP_DIR/MANIFEST")"
 restored_schema="$(psql "${PG[@]}" -v ON_ERROR_STOP=1 -Atc "SELECT COALESCE(max(version),0) FROM schema_migrations")"
 [[ "$restored_schema" == "$manifest_schema" ]] || { echo "restored schema mismatch" >&2; exit 4; }
+
+# Validate exact migration content/checksum metadata and release manifest in the restored DB.
+POSTGRES_HOST="$READINESS_RESTORE_POSTGRES_HOST" \
+POSTGRES_PORT="${READINESS_RESTORE_POSTGRES_PORT:-5432}" \
+POSTGRES_DB="$restore_db" \
+POSTGRES_USER="$READINESS_RESTORE_POSTGRES_USER" \
+POSTGRES_PASSWORD="$READINESS_RESTORE_POSTGRES_PASSWORD" \
+POSTGRES_SSLMODE="${READINESS_RESTORE_POSTGRES_SSLMODE:-disable}" \
+MIGRATIONS_DIR="$MIGRATIONS_DIR" \
+"$APP_BIN" readinessctl candidate >>"$LOG" 2>&1
 
 restored_blobs="$ARTIFACT_ROOT/recovery-restored-db-blobs.list"
 psql "${PG[@]}" -v ON_ERROR_STOP=1 -Atc "SELECT storage_key::text || '.blob' FROM mail_attachment_blobs ORDER BY storage_key" > "$restored_blobs"
