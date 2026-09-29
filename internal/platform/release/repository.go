@@ -48,7 +48,22 @@ func (r Repository) Activate(ctx context.Context,version,actor string)error{
 }
 
 func (r Repository) Rollback(ctx context.Context,actor string)error{
-	tx,err:=r.DB.BeginTx(ctx,pgx.TxOptions{});if err!=nil{return err};defer func(){_=tx.Rollback(ctx)}();var active,previous *int64;if err:=tx.QueryRow(ctx,`SELECT active_release_id,previous_release_id FROM release_state WHERE singleton=TRUE FOR UPDATE`).Scan(&active,&previous);err!=nil{return err};if active==nil||previous==nil{return ErrReleaseNotFound};var prevStatus string;if err:=tx.QueryRow(ctx,`SELECT status FROM app_releases WHERE release_id=$1 FOR UPDATE`,*previous).Scan(&prevStatus);err!=nil{return err};if prevStatus!="PREVIOUS"&&prevStatus!="STAGED"{return ErrPreflight};_,err=tx.Exec(ctx,`UPDATE app_releases SET status='PREVIOUS' WHERE release_id=$1`,*active);if err!=nil{return err};_,err=tx.Exec(ctx,`UPDATE app_releases SET status='ACTIVE',activated_at=now() WHERE release_id=$1`,*previous);if err!=nil{return err};_,err=tx.Exec(ctx,`UPDATE release_state SET active_release_id=$1,previous_release_id=$2,updated_at=now() WHERE singleton=TRUE`,*previous,*active);if err!=nil{return err};_,err=tx.Exec(ctx,`INSERT INTO release_events(release_id,action,actor,details) VALUES($1,'ROLLBACK',$2,jsonb_build_object('from_release_id',$3))`,*previous,actor,*active);if err!=nil{return err};return tx.Commit(ctx)
+	if r.DB==nil{return ErrReleaseNotFound}
+	var expectedActive,expectedPrevious *int64
+	if err:=r.DB.QueryRow(ctx,`SELECT active_release_id,previous_release_id FROM release_state WHERE singleton=TRUE`).Scan(&expectedActive,&expectedPrevious);err!=nil{return err}
+	if expectedActive==nil||expectedPrevious==nil{return ErrReleaseNotFound}
+	previousManifest,err:=r.byID(ctx,*expectedPrevious);if err!=nil{return err}
+	if previousManifest.Status!="PREVIOUS"&&previousManifest.Status!="STAGED"{return ErrPreflight}
+	if err:=r.ValidateRollbackCompatibility(ctx,previousManifest);err!=nil{
+		_,_=r.DB.Exec(ctx,`INSERT INTO release_events(release_id,action,actor,details) VALUES($1,'FAIL',$2,jsonb_build_object('operation','ROLLBACK','reason','compatibility_preflight_failed'))`,previousManifest.ID,actor)
+		return err
+	}
+
+	tx,err:=r.DB.BeginTx(ctx,pgx.TxOptions{});if err!=nil{return err};defer func(){_=tx.Rollback(ctx)}();var active,previous *int64;if err:=tx.QueryRow(ctx,`SELECT active_release_id,previous_release_id FROM release_state WHERE singleton=TRUE FOR UPDATE`).Scan(&active,&previous);err!=nil{return err};if active==nil||previous==nil{return ErrReleaseNotFound}
+	// State changed after compatibility validation: refuse to roll back a release
+	// that was not the exact previous candidate that was just checked.
+	if *active!=*expectedActive||*previous!=*expectedPrevious{return ErrPreflight}
+	var prevStatus string;if err:=tx.QueryRow(ctx,`SELECT status FROM app_releases WHERE release_id=$1 FOR UPDATE`,*previous).Scan(&prevStatus);err!=nil{return err};if prevStatus!="PREVIOUS"&&prevStatus!="STAGED"{return ErrPreflight};_,err=tx.Exec(ctx,`UPDATE app_releases SET status='PREVIOUS' WHERE release_id=$1`,*active);if err!=nil{return err};_,err=tx.Exec(ctx,`UPDATE app_releases SET status='ACTIVE',activated_at=now() WHERE release_id=$1`,*previous);if err!=nil{return err};_,err=tx.Exec(ctx,`UPDATE release_state SET active_release_id=$1,previous_release_id=$2,updated_at=now() WHERE singleton=TRUE`,*previous,*active);if err!=nil{return err};_,err=tx.Exec(ctx,`INSERT INTO release_events(release_id,action,actor,details) VALUES($1,'ROLLBACK',$2,jsonb_build_object('from_release_id',$3,'compatibility_preflight',true))`,*previous,actor,*active);if err!=nil{return err};return tx.Commit(ctx)
 }
 
 func (r Repository) Current(ctx context.Context)(active *Manifest,previous *Manifest,err error){
