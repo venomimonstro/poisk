@@ -29,20 +29,25 @@ func runReadinessCtl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,ar
 	if releaseVersion==""||releaseVersion=="dev"{return errors.New("RELEASE_VERSION is required and must identify the staged release candidate")}
 	latestSchema:=versions[len(versions)-1]
 	gate:=readiness.Gate{DB:pool,ExpectedVersions:versions,GitCommit:commit,ReleaseVersion:releaseVersion,InternetMail:cfg.MailInternetEnabled,MailDomain:cfg.MailDomain,MailSelector:strings.TrimSpace(os.Getenv("MAIL_DKIM_SELECTOR"))}
+	verifyCurrentDB:=func()error{return migrate.VerifyAppliedChecksums(ctx,pool,cfg.MigrationsDir)}
 	switch args[0]{
 	case "candidate":
+		if err:=verifyCurrentDB();err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)}
 		report,err:=gate.Candidate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Valid{return errors.New("release candidate precheck failed")};return nil
 	case "check":
+		if err:=verifyCurrentDB();err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)}
 		report,err:=gate.Evaluate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Ready{return errors.New("commercial readiness gate failed")};return nil
 	case "fresh-install-db":
 		report,err:=runFreshInstallDatabaseCheck(ctx,cfg,versions);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");return enc.Encode(report)
 	case "upgrade-db":
 		report,err:=runUpgradeDatabaseCheck(ctx,cfg,versions);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");return enc.Encode(report)
 	case "record":
+		if err:=verifyCurrentDB();err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)}
 		if len(args)<6{return errors.New("usage: readinessctl record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json]")}
 		details,err:=readinessDetails(args,6);if err!=nil{return err}
 		id,err:=readiness.RecordEvidence(ctx,pool,readiness.EvidenceInput{Type:args[1],Status:args[2],GitCommit:commit,ReleaseVersion:releaseVersion,DatabaseSchema:latestSchema,ArtifactRef:args[3],ArtifactSHA256:args[4],Actor:args[5],Details:details,CompletedAt:time.Now().UTC()});if err!=nil{return err};fmt.Fprintf(os.Stdout,"evidence_id=%d\n",id);return nil
 	case "record-file":
+		if err:=verifyCurrentDB();err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)}
 		if len(args)<5{return errors.New("usage: readinessctl record-file <type> <PASS|FAIL> <artifact_path> <actor> [details_json]")}
 		artifactRef,digest,err:=hashReadinessArtifact(args[3]);if err!=nil{return err}
 		details,err:=readinessDetails(args,5);if err!=nil{return err}
