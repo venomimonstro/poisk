@@ -36,15 +36,15 @@ mkdir -p "$ARTIFACT_ROOT"
 APP_BIN="$ARTIFACT_ROOT/poisk-app"
 LOG="$ARTIFACT_ROOT/upgrade-from-${READINESS_UPGRADE_FROM_SCHEMA}.log"
 PORT="${READINESS_UPGRADE_APP_PORT:-18081}"
+BUILD_LDFLAGS="-X github.com/venomimonstro/poisk/internal/buildinfo.GitCommit=$READINESS_GIT_SHA -X github.com/venomimonstro/poisk/internal/buildinfo.ReleaseVersion=$RELEASE_VERSION"
 if [[ ! "$PORT" =~ ^[0-9]+$ ]] || (( PORT < 1024 || PORT > 65535 )); then
   echo "READINESS_UPGRADE_APP_PORT must be between 1024 and 65535" >&2
   exit 2
 fi
 
 : > "$LOG"
-if [[ ! -x "$APP_BIN" ]]; then
-  go build -trimpath -o "$APP_BIN" ./cmd/app >>"$LOG" 2>&1
-fi
+rm -f "$APP_BIN"
+go build -trimpath -ldflags "$BUILD_LDFLAGS" -o "$APP_BIN" ./cmd/app >>"$LOG" 2>&1
 
 # Candidate binding is checked against canonical POSTGRES_* variables.
 "$APP_BIN" readinessctl candidate >>"$LOG" 2>&1
