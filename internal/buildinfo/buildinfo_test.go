@@ -15,3 +15,12 @@ func TestValidateCandidateRequiresExactBuildIdentity(t *testing.T){
 	if err:=ValidateCandidate("1123456789abcdef0123456789abcdef01234567",ReleaseVersion);err==nil{t.Fatal("wrong commit accepted")}
 	if err:=ValidateCandidate(GitCommit,"v1.2.4");err==nil{t.Fatal("wrong release accepted")}
 }
+
+func TestValidateCandidateRejectsUnsafeReleaseVersion(t *testing.T){
+	oldCommit,oldRelease:=GitCommit,ReleaseVersion;defer func(){GitCommit,ReleaseVersion=oldCommit,oldRelease}()
+	GitCommit="0123456789abcdef0123456789abcdef01234567"
+	for _,version:=range []string{"v1 bad","../v1","v1$prod","dev"}{
+		ReleaseVersion=version
+		if err:=ValidateCandidate(GitCommit,version);err==nil{t.Fatalf("unsafe release version accepted: %q",version)}
+	}
+}
