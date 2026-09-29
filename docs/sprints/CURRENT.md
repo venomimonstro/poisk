@@ -16,7 +16,10 @@
 - Security fixes используют существующие auth/RBAC/preview/apply/audit/guard patterns.
 - Commercial READY разрешён только при подтверждённых build/test/migration/recovery/capacity/browser/MTA evidence.
 - Generic readiness, Quality, Capacity и Recovery evidence обязаны относиться к exact `RELEASE_VERSION + git commit + database schema` кандидата.
+- Release/evidence-producing backend binary обязан содержать immutable embedded `git_commit + release_version`; env-переменные не являются доказательством версии бинарника.
+- Applied migrations обязаны совпадать не только по version, но и по filename + SHA-256 SQL content metadata.
 - Deployment-sensitive Browser/Security/Edge/MTA evidence обязаны быть собраны после preflight текущего candidate manifest.
+- Browser/Edge evidence допустимы только после проверки exact backend `/health/ready` и frontend `/api/frontend-build` identities через реальный HTTPS edge.
 - Re-stage изменённого manifest инвалидирует preflight; повторный неизменённый preflight/activate не сдвигает timestamp.
 - Code/static PASS не равен production PASS.
 
@@ -43,8 +46,13 @@
 - [x] generic readiness PASS evidence is release/commit/schema-bound and checked for artifact reference + SHA-256 metadata by the final Gate
 - [x] deployment-sensitive Browser/Security/Edge/MTA evidence predating current preflight is rejected
 - [x] release manifest requires exact lowercase 40-character Git SHA; restage invalidates preflight
+- [x] evidence-producing Quality/Capacity/Recovery/Readiness paths reject dev/stale binaries whose embedded identity differs from candidate env
+- [x] backend and frontend release builds embed exact commit/release identity; public edge identity endpoints are available for deployment verification
+- [x] `EDGE_TLS_PROXY` has a reproducible exact-candidate runner that verifies HTTPS, HSTS, HTTP→HTTPS and both deployed build identities
 - [x] Owner Admin exposes the canonical readiness Gate read-only; it cannot set or bypass READY
 - [x] migration versions are duplicate-protected; launch gate validates the exact repository/applied migration set
+- [x] applied migration SQL is SHA-256 bound; migration metadata is append-only after the explicit legacy baseline; concurrent migrators are serialized by advisory lock
+- [x] Fresh-install/Upgrade/Recovery runners always rebuild the exact candidate binary rather than reusing a stale artifact
 - [x] Quality history stores exact release/commit/schema binding plus golden/threshold SHA-256; old quality PASS cannot certify another candidate
 - [x] Capacity benchmark stores exact release/commit/schema binding; HIGH bottlenecks block commercial readiness
 - [x] Recovery PASS requires artifact metadata and exact release/commit/schema binding
@@ -65,7 +73,7 @@
 
 **COMMERCIAL READY: NO.**
 
-Code/static gate is PASS, but runtime evidence is intentionally not inferred. The exact release candidate must record BUILD_UNIT, INTEGRATION, FRESH_INSTALL, UPGRADE, BROWSER_SMOKE, SECURITY_REGRESSION and EDGE_TLS_PROXY evidence for its exact `RELEASE_VERSION + READINESS_GIT_SHA + database schema`; deployment-sensitive evidence must be newer than the current preflight. Internet Mail additionally requires exact-candidate MTA_FLOW plus fresh DNS readiness for the configured domain/selector. Quality, Capacity and BACKUP/RESTORE must belong to the same exact candidate; Capacity must have no HIGH bottlenecks; Quality must carry golden/threshold hashes; recovery artifacts must have SHA-256 metadata, positive size and duration. Owner Admin `/admin/readiness` and `readinessctl check` use the same canonical Gate. Only that Gate returning `ready=true` changes this verdict.
+Code/static gate is PASS, but runtime evidence is intentionally not inferred. The exact release candidate must be built with embedded backend/frontend `READINESS_GIT_SHA + RELEASE_VERSION`, deployed, and identified through the real edge before runtime evidence is accepted. Applied migration filename/SHA-256 metadata must exactly match repository SQL. The candidate must record BUILD_UNIT, INTEGRATION, FRESH_INSTALL, UPGRADE, BROWSER_SMOKE, SECURITY_REGRESSION and EDGE_TLS_PROXY evidence for its exact `RELEASE_VERSION + READINESS_GIT_SHA + database schema`; deployment-sensitive evidence must be newer than the current preflight. Internet Mail additionally requires exact-candidate MTA_FLOW plus fresh DNS readiness for the configured domain/selector. Quality, Capacity and BACKUP/RESTORE must belong to the same exact candidate; Capacity must have no HIGH bottlenecks; Quality must carry golden/threshold hashes; recovery artifacts must have SHA-256 metadata, positive size and duration. Owner Admin `/admin/readiness` and `readinessctl check` remain fail-closed. Only that Gate returning `ready=true` changes this verdict.
 
 ## Forbidden Work
 - new product verticals while this gate is open
