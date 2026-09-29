@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/venomimonstro/poisk/internal/platform/config"
+	"github.com/venomimonstro/poisk/internal/platform/migrate"
 	platformrelease "github.com/venomimonstro/poisk/internal/platform/release"
 )
 
@@ -21,7 +23,14 @@ func printReleaseEnv(manifest *platformrelease.Manifest) error {
 	_,err:=fmt.Fprintf(os.Stdout,"BACKEND_IMAGE=%s\nFRONTEND_IMAGE=%s\nRELEASE_VERSION=%s\n",manifest.BackendImage,manifest.FrontendImage,manifest.Version);return err
 }
 
-func runReleaseCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
+func verifyReleaseCandidateControl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,repo platformrelease.Repository,version string)error{
+	if err:=migrate.VerifyAppliedChecksums(ctx,pool,cfg.MigrationsDir);err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)}
+	manifest,err:=repo.ByVersion(ctx,version);if err!=nil{return err}
+	if err:=requireReleaseBuildIdentity(manifest.BuildSHA,manifest.Version);err!=nil{return fmt.Errorf("release binary identity gate failed: %w",err)}
+	return nil
+}
+
+func runReleaseCtl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,args []string)error{
 	if len(args)==0{return errors.New("usage: releasectl stage|preflight|activate|rollback|current|env|env-version")}
 	repo:=platformrelease.Repository{DB:pool};actor:=releaseActor()
 	switch args[0]{
@@ -31,11 +40,11 @@ func runReleaseCtl(ctx context.Context,pool *pgxpool.Pool,args []string)error{
 		if !platformrelease.ValidManifestFields(args[1],args[2],args[5],args[6],args[7]){return errors.New("unsafe or invalid release manifest fields")}
 		mapVersion:=args[4];if mapVersion=="-"{mapVersion=""};manifest,err:=repo.Stage(ctx,args[1],args[2],schema,mapVersion,args[5],args[6],args[7],actor);if err!=nil{return err};return json.NewEncoder(os.Stdout).Encode(manifest)
 	case "preflight":
-		if len(args)!=2{return errors.New("usage: releasectl preflight <version>")};result,err:=repo.Preflight(ctx,args[1],actor);_ = json.NewEncoder(os.Stdout).Encode(result);return err
+		if len(args)!=2{return errors.New("usage: releasectl preflight <version>")};if err:=verifyReleaseCandidateControl(ctx,cfg,pool,repo,args[1]);err!=nil{return err};result,err:=repo.Preflight(ctx,args[1],actor);_ = json.NewEncoder(os.Stdout).Encode(result);return err
 	case "activate":
-		if len(args)!=2{return errors.New("usage: releasectl activate <version>")};return repo.Activate(ctx,args[1],actor)
+		if len(args)!=2{return errors.New("usage: releasectl activate <version>")};if err:=verifyReleaseCandidateControl(ctx,cfg,pool,repo,args[1]);err!=nil{return err};return repo.Activate(ctx,args[1],actor)
 	case "rollback":
-		if len(args)!=1{return errors.New("usage: releasectl rollback")};return repo.Rollback(ctx,actor)
+		if len(args)!=1{return errors.New("usage: releasectl rollback")};if err:=migrate.VerifyAppliedChecksums(ctx,pool,cfg.MigrationsDir);err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)};return repo.Rollback(ctx,actor)
 	case "current":
 		active,previous,err:=repo.Current(ctx);if err!=nil{return err};return json.NewEncoder(os.Stdout).Encode(map[string]any{"active":active,"previous":previous})
 	case "env":
