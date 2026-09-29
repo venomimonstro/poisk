@@ -57,7 +57,8 @@ func Up(ctx context.Context, db *pgxpool.Pool, dir string) error {
 		err = conn.QueryRow(ctx, `SELECT name,sha256 FROM schema_migrations WHERE version=$1`, m.version).Scan(&storedName,&storedSHA)
 		if err == nil {
 			if storedName == nil || strings.TrimSpace(*storedName) == "" || storedSHA == nil || strings.TrimSpace(*storedSHA) == "" {
-				// Explicit first-run baseline for legacy rows. From this point forward any drift fails closed.
+				// One-time baseline for a pre-checksum database. If the immutable
+				// trigger already exists, this update intentionally fails closed.
 				if _, err = conn.Exec(ctx, `UPDATE schema_migrations SET name=$2,sha256=$3 WHERE version=$1 AND (name IS NULL OR sha256 IS NULL OR btrim(name)='' OR btrim(sha256)='')`, m.version,m.name,digest); err != nil { return fmt.Errorf("baseline migration %s checksum: %w",m.name,err) }
 				continue
 			}
@@ -79,6 +80,21 @@ func Up(ctx context.Context, db *pgxpool.Pool, dir string) error {
 			return fmt.Errorf("record migration %s: %w", m.name, err)
 		}
 		if err = tx.Commit(ctx); err != nil { return fmt.Errorf("commit migration %s: %w", m.name, err) }
+	}
+
+	// The migrator owns this metadata. After the one-time legacy checksum
+	// baseline, rows are append-only; future schema changes are new INSERTs.
+	if _, err = conn.Exec(ctx, `
+CREATE OR REPLACE FUNCTION schema_migrations_immutable() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'schema_migrations rows are immutable';
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_schema_migrations_immutable ON schema_migrations;
+CREATE TRIGGER trg_schema_migrations_immutable
+BEFORE UPDATE OR DELETE ON schema_migrations
+FOR EACH ROW EXECUTE FUNCTION schema_migrations_immutable();`); err != nil {
+		return fmt.Errorf("protect schema_migrations metadata: %w", err)
 	}
 	return nil
 }
