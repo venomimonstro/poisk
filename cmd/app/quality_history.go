@@ -31,6 +31,7 @@ func qualityInputSHA256(data []byte)string{sum:=sha256.Sum256(data);return hex.E
 func runQualityWithHistory(cfg config.Config,pool *pgxpool.Pool) error {
 	commit,err:=capacityBenchmarkCommit();if err!=nil{return fmt.Errorf("quality release binding: %w",err)}
 	releaseVersion,err:=capacityBenchmarkReleaseVersion();if err!=nil{return fmt.Errorf("quality candidate binding: %w",err)}
+	if err:=requireReleaseBuildIdentity(commit,releaseVersion);err!=nil{return fmt.Errorf("quality candidate binding: %w",err)}
 	databaseSchema,err:=capacity.NewRepository(pool).CurrentSchema(context.Background());if err!=nil{return fmt.Errorf("quality database schema: %w",err)}
 	goldenPath:=os.Getenv("QUALITY_GOLDEN_PATH");if goldenPath==""{goldenPath="/app/docs/quality/golden.seed.json"}
 	thresholdPath:=os.Getenv("QUALITY_THRESHOLDS_PATH");if thresholdPath==""{thresholdPath="/app/docs/quality/thresholds.json"}
