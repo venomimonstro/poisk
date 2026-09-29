@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: dev down logs test test-integration lint frontend-check migrate rollback seed search-quality benchmark capacity-status candidate readiness release-build release-gate fresh-install-gate upgrade-gate backup backup-verify recovery-gate restore-test health
+.PHONY: dev down logs test test-integration lint frontend-check migrate rollback seed search-quality benchmark capacity-status candidate readiness release-build release-gate fresh-install-gate upgrade-gate edge-gate backup backup-verify recovery-gate restore-test health
 
 dev:
 	docker compose up --build -d
@@ -80,6 +80,12 @@ upgrade-gate:
 	@test -n "$$READINESS_GIT_SHA" || (echo "READINESS_GIT_SHA is required" >&2; exit 2)
 	@test -n "$$RELEASE_VERSION" || (echo "RELEASE_VERSION is required" >&2; exit 2)
 	bash scripts/upgrade_gate.sh
+
+edge-gate:
+	@test -n "$$PUBLIC_BASE_URL" || (echo "PUBLIC_BASE_URL is required" >&2; exit 2)
+	@test -n "$$READINESS_GIT_SHA" || (echo "READINESS_GIT_SHA is required" >&2; exit 2)
+	@test -n "$$RELEASE_VERSION" || (echo "RELEASE_VERSION is required" >&2; exit 2)
+	bash scripts/edge_gate.sh
 
 backup:
 	@test "$$BACKUP_QUIESCED" = "yes" || (echo "BACKUP_QUIESCED=yes is required after API/mail mutators and workers are stopped" >&2; exit 2)
