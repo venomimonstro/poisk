@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/venomimonstro/poisk/internal/buildinfo"
 	"github.com/venomimonstro/poisk/internal/platform/config"
 	"github.com/venomimonstro/poisk/internal/platform/migrate"
 	"github.com/venomimonstro/poisk/internal/readiness"
@@ -30,11 +31,14 @@ func runReadinessCtl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,ar
 	latestSchema:=versions[len(versions)-1]
 	gate:=readiness.Gate{DB:pool,ExpectedVersions:versions,GitCommit:commit,ReleaseVersion:releaseVersion,InternetMail:cfg.MailInternetEnabled,MailDomain:cfg.MailDomain,MailSelector:strings.TrimSpace(os.Getenv("MAIL_DKIM_SELECTOR"))}
 	verifyCurrentDB:=func()error{return migrate.VerifyAppliedChecksums(ctx,pool,cfg.MigrationsDir)}
+	verifyBinary:=func()error{return buildinfo.ValidateCandidate(commit,releaseVersion)}
 	switch args[0]{
 	case "candidate":
+		if err:=verifyBinary();err!=nil{return fmt.Errorf("binary identity gate failed: %w",err)}
 		if err:=verifyCurrentDB();err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)}
 		report,err:=gate.Candidate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Valid{return errors.New("release candidate precheck failed")};return nil
 	case "check":
+		if err:=verifyBinary();err!=nil{return fmt.Errorf("binary identity gate failed: %w",err)}
 		if err:=verifyCurrentDB();err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)}
 		report,err:=gate.Evaluate(ctx);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if err=enc.Encode(report);err!=nil{return err};if !report.Ready{return errors.New("commercial readiness gate failed")};return nil
 	case "fresh-install-db":
@@ -42,11 +46,13 @@ func runReadinessCtl(ctx context.Context,cfg config.Config,pool *pgxpool.Pool,ar
 	case "upgrade-db":
 		report,err:=runUpgradeDatabaseCheck(ctx,cfg,versions);if err!=nil{return err};enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");return enc.Encode(report)
 	case "record":
+		if err:=verifyBinary();err!=nil{return fmt.Errorf("binary identity gate failed: %w",err)}
 		if err:=verifyCurrentDB();err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)}
 		if len(args)<6{return errors.New("usage: readinessctl record <type> <PASS|FAIL> <artifact_ref> <artifact_sha256> <actor> [details_json]")}
 		details,err:=readinessDetails(args,6);if err!=nil{return err}
 		id,err:=readiness.RecordEvidence(ctx,pool,readiness.EvidenceInput{Type:args[1],Status:args[2],GitCommit:commit,ReleaseVersion:releaseVersion,DatabaseSchema:latestSchema,ArtifactRef:args[3],ArtifactSHA256:args[4],Actor:args[5],Details:details,CompletedAt:time.Now().UTC()});if err!=nil{return err};fmt.Fprintf(os.Stdout,"evidence_id=%d\n",id);return nil
 	case "record-file":
+		if err:=verifyBinary();err!=nil{return fmt.Errorf("binary identity gate failed: %w",err)}
 		if err:=verifyCurrentDB();err!=nil{return fmt.Errorf("migration integrity gate failed: %w",err)}
 		if len(args)<5{return errors.New("usage: readinessctl record-file <type> <PASS|FAIL> <artifact_path> <actor> [details_json]")}
 		artifactRef,digest,err:=hashReadinessArtifact(args[3]);if err!=nil{return err}
