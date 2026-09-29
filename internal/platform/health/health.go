@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/venomimonstro/poisk/internal/buildinfo"
 )
 
 type Checker struct {
@@ -17,13 +18,21 @@ type Checker struct {
 	ManticoreSQLPort  int
 }
 
+type buildIdentity struct {
+	GitCommit string `json:"git_commit"`
+	ReleaseVersion string `json:"release_version"`
+}
+
 type response struct {
 	Status     string            `json:"status"`
 	Components map[string]string `json:"components,omitempty"`
+	Build buildIdentity `json:"build"`
 }
 
+func currentBuild()buildIdentity{return buildIdentity{GitCommit:buildinfo.GitCommit,ReleaseVersion:buildinfo.ReleaseVersion}}
+
 func (c Checker) Live(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, response{Status: "ok"})
+	writeJSON(w, http.StatusOK, response{Status: "ok",Build:currentBuild()})
 }
 
 func (c Checker) Ready(w http.ResponseWriter, r *http.Request) {
@@ -51,15 +60,17 @@ func (c Checker) Ready(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !ready {
-		writeJSON(w, http.StatusServiceUnavailable, response{Status: "not_ready", Components: components})
+		writeJSON(w, http.StatusServiceUnavailable, response{Status: "not_ready", Components: components,Build:currentBuild()})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, response{Status: "ready", Components: components})
+	writeJSON(w, http.StatusOK, response{Status: "ready", Components: components,Build:currentBuild()})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control","no-store")
+	w.Header().Set("X-Content-Type-Options","nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
