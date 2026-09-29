@@ -58,6 +58,7 @@ func runCapacityBenchmark(ctx context.Context,repo *capacity.Repository,label st
 	manticoreBytes,err:=envInt64Required("CAPACITY_MANTICORE_BYTES",1);if err!=nil{return fmt.Errorf("CAPACITY_MANTICORE_BYTES must contain a measured Manticore data size: %w",err)}
 	commit,err:=capacityBenchmarkCommit();if err!=nil{return err}
 	releaseVersion,err:=capacityBenchmarkReleaseVersion();if err!=nil{return err}
+	if err:=requireReleaseBuildIdentity(commit,releaseVersion);err!=nil{return err}
 	databaseSchema,err:=repo.CurrentSchema(ctx);if err!=nil{return fmt.Errorf("read capacity benchmark schema: %w",err)}
 	searchURLs,err:=searchURLsFromFile(base,os.Getenv("CAPACITY_SEARCH_QUERIES"));if err!=nil{return err}
 	geoURLs,err:=endpointURLsFromFile(base,os.Getenv("CAPACITY_GEO_URLS"),"/api/geo/");if err!=nil{return err}
