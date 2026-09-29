@@ -20,6 +20,7 @@ type adminReadinessReader struct{
 func (r adminReadinessReader) Evaluate(ctx context.Context)(readiness.Report,error){
 	if r.db==nil{return readiness.Report{},errors.New("readiness database is not initialized")}
 	versions,err:=migrate.ExpectedVersions(r.cfg.MigrationsDir);if err!=nil{return readiness.Report{},err}
+	if err:=migrate.VerifyAppliedChecksums(ctx,r.db,r.cfg.MigrationsDir);err!=nil{return readiness.Report{},err}
 	commit:=strings.ToLower(strings.TrimSpace(os.Getenv("READINESS_GIT_SHA")))
 	releaseVersion:=strings.TrimSpace(os.Getenv("RELEASE_VERSION"))
 	if commit==""||releaseVersion==""||releaseVersion=="dev"{return readiness.Report{},errors.New("READINESS_GIT_SHA and a staged RELEASE_VERSION are required")}
