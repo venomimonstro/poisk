@@ -1,9 +1,11 @@
 FROM golang:1.27-bookworm AS build
 WORKDIR /src
+ARG BUILD_SHA=dev
+ARG RELEASE_VERSION=dev
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/poisk ./cmd/app
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X github.com/venomimonstro/poisk/internal/buildinfo.GitCommit=${BUILD_SHA} -X github.com/venomimonstro/poisk/internal/buildinfo.ReleaseVersion=${RELEASE_VERSION}" -o /out/poisk ./cmd/app
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
