@@ -13,6 +13,7 @@ This runbook is the release gate for a commercial deployment. A code/static revi
 - Crawler/Webmaster fetches only use HTTP(S) ports 80/443, revalidate every redirect and re-resolve/validate DNS again at dial time. Private, loopback, link-local and metadata ranges are rejected.
 - Mail attachments are stored under the configured blob root with validated storage keys. Downloads are attachments with `nosniff`, private/no-store caching and CSP sandbox.
 - Internet Mail is disabled by default. The application submits only to the configured HTTP(S) MTA origin and never follows MTA redirects. Public SMTP relay policy belongs to the MTA edge and must be proven by runtime evidence; the application does not accept arbitrary client-supplied outbound envelope senders.
+- Release builds embed immutable `git_commit + release_version` identity. A local/dev binary cannot create launch evidence for a staged candidate.
 
 ## Required runtime evidence
 
@@ -26,10 +27,24 @@ Required evidence types:
 - `UPGRADE` — supported previous schema upgraded to the exact repository migration set without data loss.
 - `BROWSER_SMOKE` — Search, Account, Webmaster, Maps/Reviews, Mail and Admin browser paths; max age 7 days.
 - `SECURITY_REGRESSION` — auth/session/CSRF/RBAC/tenant isolation, SSRF, path traversal, body limits, mail HMAC/replay and MTA abuse regression suite; max age 7 days.
-- `EDGE_TLS_PROXY` — real HTTPS edge test proving redirect-to-HTTPS policy, secure cookies and correct proxy boundary; max age 24 hours.
+- `EDGE_TLS_PROXY` — real HTTPS edge test proving redirect-to-HTTPS policy, exact backend/frontend deployed build identity, secure cookies and correct proxy boundary; max age 24 hours.
 - `MTA_FLOW` — required only when Internet Mail is enabled; proves outbound submit, delivery/bounce callback, inbound delivery, replay rejection and SMTP relay/sender policy; max age 24 hours.
 
 Each evidence artifact must have a SHA-256 digest. Record only a reference/path and digest; do not store passwords, session tokens, gateway secrets, DKIM private keys, payment payloads or raw MIME in readiness evidence.
+
+Before recording `BROWSER_SMOKE` or `EDGE_TLS_PROXY`, verify the deployed candidate through the real HTTPS edge:
+
+```text
+GET <PUBLIC_BASE_URL>/health/ready
+  .build.git_commit       == READINESS_GIT_SHA
+  .build.release_version  == RELEASE_VERSION
+
+GET <PUBLIC_BASE_URL>/api/frontend-build
+  .git_commit             == READINESS_GIT_SHA
+  .release_version        == RELEASE_VERSION
+```
+
+A mismatch means the tested deployment is not the staged candidate; no browser/edge PASS evidence may be recorded.
 
 Example shape (replace placeholders with real values):
 
@@ -42,21 +57,22 @@ Repeat for every required evidence type. A FAIL record is retained immutably and
 ## Release-gate sequence
 
 1. Stage the exact candidate in the release registry and run release preflight.
-2. Deploy/test that exact candidate commit in an isolated release environment.
-3. Run migrations. Confirm the applied migration version set exactly equals the repository version set; missing versions in the middle are blockers.
-4. Produce and record `BUILD_UNIT` evidence.
-5. Produce and record `INTEGRATION` evidence.
-6. Verify a fresh installation and record `FRESH_INSTALL` evidence.
-7. Restore a supported previous-schema fixture, upgrade it, validate retained canonical data and record `UPGRADE` evidence.
-8. Run browser smoke for Search, Account, Webmaster, Maps/Reviews, Mail and Admin; record `BROWSER_SMOKE`.
-9. Run the security regression matrix; record `SECURITY_REGRESSION`.
-10. Verify the real HTTPS edge and secure-cookie behavior; record `EDGE_TLS_PROXY`.
-11. Run the Search Quality gate with the same `READINESS_GIT_SHA`. The stored quality run must belong to the exact candidate commit/schema, PASS and be no older than 7 days.
-12. Run an `ISOLATED_1M` Capacity benchmark with the same `READINESS_GIT_SHA`, at least 1,000,000 measured documents, real server CPU/RAM/disk measurements and an ADR. The snapshot must belong to the exact candidate commit/schema, contain no HIGH bottlenecks and be no older than 30 days.
-13. Run BACKUP and RESTORE drills with the same `READINESS_GIT_SHA`. Both drills must belong to the exact candidate commit/schema, include artifact ref + SHA-256 + positive byte size + positive duration, PASS and be no older than 30 days.
-14. Confirm `resource_pressure` is fresh and not CRITICAL.
-15. If Internet Mail is enabled: verify DNS readiness for the currently configured `MAIL_DOMAIN + MAIL_DKIM_SELECTOR` with no drift, run the full MTA abuse/delivery matrix below, and record fresh `MTA_FLOW` evidence.
-16. Run:
+2. Build backend and frontend release images with embedded candidate identity (`make release-build`) and deploy those exact images to the isolated release environment.
+3. Through the real HTTPS edge verify backend `/health/ready` and frontend `/api/frontend-build` both report the exact candidate SHA/version.
+4. Run migrations. Confirm the applied migration version **and SHA-256 content metadata** exactly match the repository migration files; missing versions or checksum drift are blockers.
+5. Produce and record `BUILD_UNIT` evidence.
+6. Produce and record `INTEGRATION` evidence.
+7. Verify a fresh installation and record `FRESH_INSTALL` evidence.
+8. Restore a supported previous-schema fixture, upgrade it, validate retained canonical data and record `UPGRADE` evidence.
+9. Run browser smoke for Search, Account, Webmaster, Maps/Reviews, Mail and Admin; record `BROWSER_SMOKE`.
+10. Run the security regression matrix; record `SECURITY_REGRESSION`.
+11. Verify the real HTTPS edge, exact backend/frontend build identities and secure-cookie behavior; record `EDGE_TLS_PROXY`.
+12. Run the Search Quality gate with the same `READINESS_GIT_SHA`. The stored quality run must belong to the exact candidate commit/schema, PASS and be no older than 7 days.
+13. Run an `ISOLATED_1M` Capacity benchmark with the same `READINESS_GIT_SHA`, at least 1,000,000 measured documents, real server CPU/RAM/disk measurements and an ADR. The snapshot must belong to the exact candidate commit/schema, contain no HIGH bottlenecks and be no older than 30 days.
+14. Run BACKUP and RESTORE drills with the same `READINESS_GIT_SHA`. Both drills must belong to the exact candidate commit/schema, include artifact ref + SHA-256 + positive byte size + positive duration, PASS and be no older than 30 days.
+15. Confirm `resource_pressure` is fresh and not CRITICAL.
+16. If Internet Mail is enabled: verify DNS readiness for the currently configured `MAIL_DOMAIN + MAIL_DKIM_SELECTOR` with no drift, run the full MTA abuse/delivery matrix below, and record fresh `MTA_FLOW` evidence.
+17. Run:
 
 ```text
 READINESS_GIT_SHA=<exact-commit> RELEASE_VERSION=<staged-version> ./app readinessctl check
@@ -65,6 +81,8 @@ READINESS_GIT_SHA=<exact-commit> RELEASE_VERSION=<staged-version> ./app readines
 Only `ready=true` permits a commercial release.
 
 ## Browser smoke matrix
+
+Identity precondition: `/health/ready` and `/api/frontend-build` must both identify the exact candidate before any PASS result below is accepted.
 
 - Search: home page, query, pagination/result click, Answer fallback/available paths.
 - Account: register/login, CSRF rotation, sessions list, revoke current/other session, logout.
@@ -131,7 +149,7 @@ When Internet Mail is enabled, `MTA_FLOW` is not satisfied by a single successfu
 1. Stop writes/heavy workers as appropriate.
 2. Use the immutable release registry to select the previous validated release; do not ad-hoc edit release state.
 3. Use the latest verified **exact-release** backup and recovery procedure. A backup without a successful restore drill for the same commit/schema is not sufficient evidence.
-4. After restore, verify migration set, canonical counts, index consistency and Search/Map/Webmaster/Mail smoke before reopening writes.
+4. After restore, verify migration version+checksum integrity, canonical counts, index consistency and Search/Map/Webmaster/Mail smoke before reopening writes.
 5. Record new recovery and readiness evidence; never reuse evidence from a different commit/schema/release manifest.
 
 ### Capacity incident
@@ -142,4 +160,4 @@ When Internet Mail is enabled, `MTA_FLOW` is not satisfied by a single successfu
 
 ## Launch verdict
 
-If any required evidence is missing, stale, FAIL, tied to another commit/schema/release manifest, contains a HIGH Capacity bottleneck, or if any known P0/P1 remains unresolved, the verdict is **NOT READY**. Missing runtime evidence must never be converted into a code/static PASS.
+If any required evidence is missing, stale, FAIL, tied to another commit/schema/release manifest, migration content differs from the applied checksum metadata, deployed frontend/backend identity differs from the candidate, contains a HIGH Capacity bottleneck, or if any known P0/P1 remains unresolved, the verdict is **NOT READY**. Missing runtime evidence must never be converted into a code/static PASS.
