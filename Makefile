@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: dev down logs test test-integration lint frontend-check migrate rollback seed search-quality benchmark capacity-status candidate readiness release-gate fresh-install-gate upgrade-gate backup backup-verify recovery-gate restore-test health
+.PHONY: dev down logs test test-integration lint frontend-check migrate rollback seed search-quality benchmark capacity-status candidate readiness release-build release-gate fresh-install-gate upgrade-gate backup backup-verify recovery-gate restore-test health
 
 dev:
 	docker compose up --build -d
@@ -33,6 +33,13 @@ rollback:
 
 seed:
 	@echo "Canonical data is populated through crawler/import pipelines; there is no generic production seed target."
+
+release-build:
+	@test -n "$$READINESS_GIT_SHA" || (echo "READINESS_GIT_SHA is required" >&2; exit 2)
+	@test "$${#READINESS_GIT_SHA}" -eq 40 || (echo "READINESS_GIT_SHA must be a 40-character Git SHA" >&2; exit 2)
+	@test -n "$$RELEASE_VERSION" && test "$$RELEASE_VERSION" != "dev" || (echo "RELEASE_VERSION is required" >&2; exit 2)
+	@test -n "$$BACKEND_IMAGE" || (echo "BACKEND_IMAGE is required for release-build" >&2; exit 2)
+	docker build --pull --build-arg BUILD_SHA="$$READINESS_GIT_SHA" --build-arg RELEASE_VERSION="$$RELEASE_VERSION" -f Dockerfile.backend -t "$$BACKEND_IMAGE" .
 
 search-quality:
 	@test -n "$$READINESS_GIT_SHA" || (echo "READINESS_GIT_SHA is required" >&2; exit 2)
