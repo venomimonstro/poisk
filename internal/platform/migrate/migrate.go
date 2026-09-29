@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -56,7 +58,7 @@ func Up(ctx context.Context, db *pgxpool.Pool, dir string) error {
 		if err == nil {
 			if storedName == nil || strings.TrimSpace(*storedName) == "" || storedSHA == nil || strings.TrimSpace(*storedSHA) == "" {
 				// Explicit first-run baseline for legacy rows. From this point forward any drift fails closed.
-				if _, err = conn.Exec(ctx, `UPDATE schema_migrations SET name=$2,sha256=$3 WHERE version=$1 AND (name IS NULL OR sha256 IS NULL)`, m.version,m.name,digest); err != nil { return fmt.Errorf("baseline migration %s checksum: %w",m.name,err) }
+				if _, err = conn.Exec(ctx, `UPDATE schema_migrations SET name=$2,sha256=$3 WHERE version=$1 AND (name IS NULL OR sha256 IS NULL OR btrim(name)='' OR btrim(sha256)='')`, m.version,m.name,digest); err != nil { return fmt.Errorf("baseline migration %s checksum: %w",m.name,err) }
 				continue
 			}
 			if *storedName != m.name || strings.ToLower(strings.TrimSpace(*storedSHA)) != digest {
@@ -64,10 +66,7 @@ func Up(ctx context.Context, db *pgxpool.Pool, dir string) error {
 			}
 			continue
 		}
-		if !strings.Contains(strings.ToLower(err.Error()), "no rows") {
-			// pgx.ErrNoRows is intentionally avoided here to keep this package's imports minimal.
-			return fmt.Errorf("check migration %s: %w", m.name, err)
-		}
+		if !errors.Is(err,pgx.ErrNoRows) { return fmt.Errorf("check migration %s: %w", m.name, err) }
 
 		tx, err := conn.Begin(ctx)
 		if err != nil { return fmt.Errorf("begin migration %s: %w", m.name, err) }
